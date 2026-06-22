@@ -1,0 +1,25 @@
+{
+  "name": "@ironlabs/plugin",
+  "version": "0.1.0",
+  "type": "module",
+  "openclaw": {
+    "extensions": ["./index.mjs"]
+  },
+  "scripts": {
+    "build": "tsc"
+  },
+  "files": [
+    ".claude-plugin/",
+    "openclaw.plugin.json",
+    "index.mjs",
+    "hooks/",
+    "skills/",
+    "commands/",
+    "src/",
+    "README.md"
+  ],
+  "devDependencies": {
+    "typescript": "^5.0.0",
+    "@types/node": "^20.0.0"
+  }
+}
