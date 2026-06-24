@@ -95,6 +95,7 @@ Return ONLY valid JSON with these fields:
 
 function parseArgs(argv) {
   const files = [];
+  const dataUris = [];
   let resolution = "medium";
   let mode = null;
   let model = "gemini-2.5-flash";
@@ -106,6 +107,7 @@ function parseArgs(argv) {
   for (let i = 0; i < argv.length; i++) {
     switch (argv[i]) {
       case "--file":        files.push(argv[++i]); break;
+      case "--data-uri":    dataUris.push(argv[++i]); break;
       case "--resolution":  resolution = argv[++i]; break;
       case "--mode":        mode = argv[++i]; break;
       case "--model":       model = argv[++i]; break;
@@ -116,7 +118,7 @@ function parseArgs(argv) {
     }
   }
 
-  return { files, resolution, mode, model, temperature, maxTokens, jsonMode, prompt: textParts.join(" ") };
+  return { files, dataUris, resolution, mode, model, temperature, maxTokens, jsonMode, prompt: textParts.join(" ") };
 }
 
 // Upload a large file to IronLabs CDN and return a public URL.
@@ -138,9 +140,17 @@ async function uploadToCdn(filePath, mimeType, base64) {
   return json.data?.url;
 }
 
-// Build Irona-compatible content parts from files
-async function buildContentParts(files, prompt) {
+// Build Irona-compatible content parts from files and inline data URIs
+async function buildContentParts(files, dataUris, prompt) {
   const parts = [];
+
+  for (const uri of dataUris) {
+    if (!uri.startsWith("data:")) {
+      console.error(`Skipping invalid --data-uri (must start with "data:"): ${uri.slice(0, 40)}...`);
+      continue;
+    }
+    parts.push({ type: "image_url", image_url: { url: uri } });
+  }
 
   for (const filePath of files) {
     const stat = await fs.stat(filePath);
@@ -195,7 +205,10 @@ async function createConversation() {
     headers: { Authorization: `Bearer ${IRONLABS_API_KEY}`, "Content-Type": "application/json" },
     body: JSON.stringify({ title: "gemini-gen" }),
   });
-  if (!resp.ok) throw new Error(`Failed to create conversation: ${resp.status}`);
+  if (!resp.ok) {
+    const body = await resp.text().catch(() => "(no body)");
+    throw new Error(`Failed to create conversation: ${resp.status} — ${body}`);
+  }
   const data = await resp.json();
   return data.data?.id ?? data.id;
 }
@@ -255,11 +268,12 @@ async function callCompletions(messages, model, jsonMode) {
 async function main() {
   let opts = parseArgs(process.argv.slice(2));
 
-  if (!opts.prompt && opts.files.length === 0 && !opts.mode) {
+  if (!opts.prompt && opts.files.length === 0 && opts.dataUris.length === 0 && !opts.mode) {
     console.error(`Usage: node gemini.mjs [options] <prompt>
 
 Options:
   --file <path>         Attach local file (repeatable, ≤20MB inline)
+  --data-uri <uri>      Inline base64 data URI (repeatable, e.g. "data:image/jpeg;base64,...")
   --resolution <level>  low / medium / high / ultra_high (hint only)
   --mode <name>         Preset: product, video-script, style
   --model <name>        Irona model (default: gemini-2.5-flash)
@@ -271,6 +285,7 @@ Requires: IRONLABS_API_KEY
 
 Examples:
   node gemini.mjs --file photo.jpg --mode product
+  node gemini.mjs --data-uri "data:image/jpeg;base64,..." --mode product
   node gemini.mjs --file clip.mp4 --mode video-script
   node gemini.mjs --file ref.jpg --mode style
   node gemini.mjs --file a.jpg --file b.jpg "Compare these two"`);
@@ -283,7 +298,7 @@ Examples:
     opts.prompt += "\nRespond with valid JSON only.";
   }
 
-  const contentParts = await buildContentParts(opts.files, opts.prompt);
+  const contentParts = await buildContentParts(opts.files, opts.dataUris, opts.prompt);
 
   if (!contentParts.length) {
     console.error("No content to send.");

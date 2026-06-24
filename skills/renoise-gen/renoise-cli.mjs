@@ -81,34 +81,35 @@ function listLocalMaterials(params = {}) {
   } catch { return []; }
 }
 
-// FAL pricing (USD per unit)
-const FAL_PRICING = {
-  "fal-ai/minimax/video-01":      { type: "video", perSecond: 0.035 },
-  "fal-ai/minimax/video-01-lite": { type: "video", perSecond: 0.015 },
-  "fal-ai/flux/dev":              { type: "image", flat: 0.025 },
-  "fal-ai/flux-pro/v1.1":         { type: "image", flat: 0.040 },
-  "fal-ai/ideogram/v2":           { type: "image", flat: 0.080 },
-  "fal-ai/gpt-image-1":           { type: "image", flat: 0.060 },
+// OpenRouter pricing estimates (USD per unit)
+const OR_PRICING = {
+  "x-ai/grok-imagine-video":   { type: "video", perSecond: 0.040 },
+  "kwaivgi/kling-v3.0-pro":    { type: "video", perSecond: 0.045 },
+  "bytedance/seedance-2.0":    { type: "video", perSecond: 0.035 },
+  "google/gemini-3.1-flash-image-preview": { type: "image", flat: 0.020 },
 };
 
-// FAL model aliases
+// OpenRouter model aliases (keyed by friendly name → OR model id)
 const VIDEO_MODEL_MAP = {
-  "renoise-2.0": "fal-ai/minimax/video-01",
-  "renoise-2.0-fast": "fal-ai/minimax/video-01-lite",
-  "youmeng-2.0": "fal-ai/minimax/video-01",
-  "seedance-2.0": "fal-ai/minimax/video-01",
-  "sd-2.0": "fal-ai/minimax/video-01",
+  "renoise-2.0":      "x-ai/grok-imagine-video",
+  "renoise-2.0-fast": "kwaivgi/kling-v3.0-pro",
+  "youmeng-2.0":      "bytedance/seedance-2.0",
+  "seedance-2.0":     "bytedance/seedance-2.0",
+  "sd-2.0":           "bytedance/seedance-2.0",
 };
 const IMAGE_MODEL_MAP = {
-  "nano-banana-2": "fal-ai/flux/dev",
-  "nano-banana-pro": "fal-ai/flux-pro/v1.1",
-  "midjourney-v7": "fal-ai/ideogram/v2",
-  "midjourney": "fal-ai/ideogram/v2",
-  "gpt-image-2": "fal-ai/gpt-image-1",
+  "nano-banana-2":   "google/gemini-3.1-flash-image-preview",
+  "nano-banana-pro": "google/gemini-3.1-flash-image-preview",
+  "midjourney-v7":   "google/gemini-3.1-flash-image-preview",
+  "midjourney":      "google/gemini-3.1-flash-image-preview",
+  "gpt-image-2":     "google/gemini-3.1-flash-image-preview",
 };
 const RATIO_TO_IMAGE_SIZE = {
-  "1:1": "square_hd", "16:9": "landscape_16_9", "9:16": "portrait_16_9",
-  "4:3": "landscape_4_3", "3:4": "portrait_4_3", "21:9": "landscape_16_9",
+  "1:1":  "1024x1024",
+  "16:9": "1536x1024",
+  "9:16": "1024x1536",
+  "4:3":  "1344x1024",
+  "3:4":  "1024x1344",
 };
 
 // src/client.ts
@@ -138,7 +139,7 @@ var IronlabsClient = class {
     const data = await this.request("POST", "/ext/token", { scope, ttlSeconds: 3600 });
     return data.data?.token || data.token;
   }
-  // ---- MCP call ----
+  // ---- MCP call (routes through IronLabs backend → external connector) ----
   async mcpCall(connector, toolName, toolArguments) {
     const token = await this.issueSandboxToken([connector]);
     const url = `${this.baseUrl}/mcp/${connector}`;
@@ -176,13 +177,13 @@ var IronlabsClient = class {
   }
   async estimateCost(params = {}) {
     const isImage = this.isImageModel(params.model);
-    const falModel = this.mapFalModel(params.model, isImage);
-    const pricing = FAL_PRICING[falModel];
-    if (!pricing) return { credits: 0, note: `No pricing data for ${falModel || "unknown model"}` };
+    const model = this.mapModel(params.model, isImage);
+    const pricing = OR_PRICING[model];
+    if (!pricing) return { credits: 0, note: `No pricing data for ${model || "unknown model"}` };
     const usd = pricing.type === "video"
       ? (parseInt(params.duration) || 5) * pricing.perSecond
       : pricing.flat;
-    return { credits: Math.ceil(usd * 100), usd: parseFloat(usd.toFixed(4)), model: falModel };
+    return { credits: Math.ceil(usd * 100), usd: parseFloat(usd.toFixed(4)), model };
   }
   async getCreditHistory(limit = 50) {
     const data = await this.request("GET", `/chat/transactions?limit=${limit}`);
@@ -192,49 +193,17 @@ var IronlabsClient = class {
   isImageModel(model) {
     if (!model) return false;
     return Object.keys(IMAGE_MODEL_MAP).includes(model) ||
-      ["flux", "ideogram", "gpt-image", "imagen"].some(k => model.includes(k));
+      ["gemini", "flux", "ideogram", "gpt-image", "imagen"].some(k => model.includes(k));
   }
-  mapFalModel(model, isImage) {
-    if (!model) return isImage ? "fal-ai/flux/dev" : "fal-ai/minimax/video-01";
-    if (model.includes("/")) return model; // already a FAL model path
+  mapModel(model, isImage) {
+    if (!model) return isImage ? "google/gemini-3.1-flash-image-preview" : "x-ai/grok-imagine-video";
+    if (model.includes("/")) return model; // already a full OR model path
     return (isImage ? IMAGE_MODEL_MAP : VIDEO_MODEL_MAP)[model] ||
-      (isImage ? "fal-ai/flux/dev" : "fal-ai/minimax/video-01");
-  }
-  buildFalInput(params, isImage) {
-    const input = { prompt: params.prompt };
-    if (isImage) {
-      input.image_size = RATIO_TO_IMAGE_SIZE[params.ratio] || "square_hd";
-      if (params.resolution) {
-        const resMap = { "2k": "landscape_16_9", "4k": "landscape_16_9" };
-        if (resMap[params.resolution]) input.image_size = resMap[params.resolution];
-      }
-    } else {
-      if (params.ratio) input.aspect_ratio = params.ratio;
-      if (params.duration) input.duration = Math.min(10, parseInt(params.duration));
-      if (params.resolution) {
-        const vidResMap = { "1k": "720p", "2k": "1080p", "4k": "1080p" };
-        input.resolution = vidResMap[params.resolution] || params.resolution;
-      }
-    }
-    // Resolve materials
-    if (params.materials?.length) {
-      for (const mat of params.materials) {
-        const dataUri = mat._dataUri;
-        if (!dataUri) continue;
-        if (mat.role === "first_frame" || mat.role === "ref_image") {
-          input.first_frame_image_url = dataUri;
-        } else if (mat.role === "last_frame") {
-          input.last_frame_image_url = dataUri;
-        } else if (mat.role === "ref_video") {
-          input.reference_video_url = dataUri;
-        }
-      }
-    }
-    return input;
+      (isImage ? "google/gemini-3.1-flash-image-preview" : "x-ai/grok-imagine-video");
   }
   async createTask(params) {
     const isImage = this.isImageModel(params.model);
-    // Resolve material data URIs
+    // Resolve material data URIs from local store
     if (params.materials?.length) {
       for (const mat of params.materials) {
         let matData = null;
@@ -244,22 +213,68 @@ var IronlabsClient = class {
         if (matData) mat._dataUri = matData.dataUri || matData.url;
       }
     }
-    const falModel = this.mapFalModel(params.model, isImage);
-    const falInput = this.buildFalInput(params, isImage);
-    console.log(`Calling FAL via IronLabs connector (${falModel})...`);
-    const falResult = await this.mcpCall("fal", "fal_run", { model: falModel, input: falInput });
+    const model = this.mapModel(params.model, isImage);
     const taskId = Date.now();
-    const videoUrl = falResult.video?.url || falResult.videos?.[0]?.url || null;
-    const imageUrl = falResult.images?.[0]?.url || falResult.image?.url || null;
-    const coverUrl = falResult.video?.thumbnail_url || falResult.thumbnail_url || null;
-    const result = {
-      taskId, status: "completed",
-      model: falModel, prompt: params.prompt,
-      tags: params.tags || [],
-      videoUrl, imageUrl, coverUrl, falResult,
-    };
-    writeTask(taskId, result);
-    return { task: { id: taskId, status: "completed", estimatedCredit: 0 } };
+    if (isImage) {
+      // image_generate via openrouter connector — returns a chat-completion with image modality
+      const orArgs = {
+        prompt: params.prompt,
+        model,
+        size: RATIO_TO_IMAGE_SIZE[params.ratio] || "1024x1024",
+      };
+      // image-to-image: pass a reference image if provided
+      const imageRef = params.materials?.find(m => m.role === "ref_image" || m.role === "first_frame");
+      if (imageRef?._dataUri) orArgs.image_url = imageRef._dataUri;
+      console.log(`Generating image via OpenRouter connector (${model})...`);
+      const orResult = await this.mcpCall("openrouter", "image_generate", orArgs);
+      // Extract image URL from chat-completion response (modalities: image+text)
+      const choice = orResult.choices?.[0]?.message;
+      let imageUrl = null;
+      if (Array.isArray(choice?.content)) {
+        const imgPart = choice.content.find(p => p.type === "image_url");
+        imageUrl = imgPart?.image_url?.url ?? null;
+      }
+      const stored = {
+        taskId, status: "completed",
+        model, prompt: params.prompt,
+        tags: params.tags || [],
+        videoUrl: null, imageUrl, coverUrl: null, orResult,
+      };
+      writeTask(taskId, stored);
+      return { task: { id: taskId, status: "completed", estimatedCredit: 0 } };
+    } else {
+      // video_submit via openrouter connector — async, returns { id, polling_url, status }
+      const firstFrame = params.materials?.find(m => m.role === "first_frame" || m.role === "ref_image");
+      const lastFrame  = params.materials?.find(m => m.role === "last_frame");
+      if (!firstFrame?._dataUri) {
+        throw new ApiError(400, {}, "Video generation requires a reference image (first_frame or ref_image material). Attach one with --materials.");
+      }
+      const orArgs = {
+        prompt: params.prompt,
+        model,
+        image_url: firstFrame._dataUri,
+      };
+      if (lastFrame?._dataUri) orArgs.last_image_url = lastFrame._dataUri;
+      if (params.duration) orArgs.duration = parseInt(params.duration);
+      if (params.ratio)    orArgs.aspect_ratio = params.ratio;
+      if (params.resolution) {
+        const resMap = { "1k": "720p", "2k": "1080p", "4k": "1080p" };
+        orArgs.resolution = resMap[params.resolution] || params.resolution;
+      }
+      console.log(`Submitting video via OpenRouter connector (${model})...`);
+      const submitResult = await this.mcpCall("openrouter", "video_submit", orArgs);
+      const generationId = submitResult.id;
+      if (!generationId) throw new ApiError(500, submitResult, "OpenRouter connector did not return a generation id");
+      const stored = {
+        taskId, status: "pending",
+        model, prompt: params.prompt,
+        tags: params.tags || [],
+        videoUrl: null, imageUrl: null, coverUrl: null,
+        _openrouterId: generationId,
+      };
+      writeTask(taskId, stored);
+      return { task: { id: taskId, status: "pending", estimatedCredit: 0 } };
+    }
   }
   async listTasks(params = {}) {
     return { tasks: listLocalTasks(params) };
@@ -282,8 +297,30 @@ var IronlabsClient = class {
   }
   async listTags() { return { tags: [] }; }
   async waitForTask(id) {
-    // Tasks are synchronous via MCP — already completed at createTask time
-    return this.getTaskResult(id);
+    const result = readTask(id);
+    if (!result) throw new ApiError(404, {}, `Task #${id} not found`);
+    if (result.status === "completed") return result;
+    // Video task: poll via openrouter connector until terminal
+    const generationId = result._openrouterId;
+    if (!generationId) throw new ApiError(500, {}, `Task #${id} has no generation ID to poll`);
+    const start = Date.now();
+    const maxWaitMs = 600_000;
+    while (Date.now() - start < maxWaitMs) {
+      await new Promise(r => setTimeout(r, 10_000)); // poll every 10s
+      const poll = await this.mcpCall("openrouter", "video_status", { id: generationId });
+      process.stderr.write(`  Status: ${poll.status || "unknown"}... (${Math.round((Date.now() - start) / 1000)}s elapsed)\n`);
+      if (poll.status === "completed") {
+        result.status = "completed";
+        result.videoUrl = poll.unsigned_urls?.[0] || null;
+        result.orResult = poll;
+        writeTask(id, result);
+        return result;
+      }
+      if (poll.status === "failed") {
+        throw new ApiError(500, poll, `Video generation failed: ${poll.error || "unknown error"}`);
+      }
+    }
+    throw new ApiError(408, {}, `Video generation timed out after ${maxWaitMs / 1000}s`);
   }
   async generate(params, options) {
     const { task } = await this.createTask(params);
@@ -484,7 +521,7 @@ Domains:
   credit      Check balance and transaction history
 
 Environment:
-  IRONLABS_API_KEY   API key, sent as Authorization: Bearer
+  IRONLABS_API_KEY   IronLabs API key — all requests (balance, generation, uploads)
                      Get one at https://studio.ironlabs.ai → API Keys
   IRONLABS_BASE_URL  (optional) Full API base URL
                      Default: https://chat.irona.ai/api/v1
@@ -494,7 +531,8 @@ Global Flags:
 
 Run "ironlabs <domain> help" for domain-specific commands.
 
-Note: tasks are generated synchronously via IronLabs FAL connector.
+Note: generation routes through the IronLabs OpenRouter connector — only IRONLABS_API_KEY needed.
+      Video tasks are async: task generate polls until done (~1-5 min).
       Results are cached locally in ~/.ironlabs/tasks/.
       Materials are stored locally in ~/.ironlabs/materials/.
 `.trim();
@@ -503,7 +541,7 @@ ironlabs task — Manage generation tasks
 
 Commands:
   generate                    Create task + wait for result (one step)
-  create                      Create a task (synchronous via FAL MCP connector)
+  create                      Create a task (async via OpenRouter; poll with task wait/result)
   list                        List local tasks
   get <id>                    Get task detail
   result <id>                 Get task result
@@ -515,7 +553,7 @@ Commands:
 
 Options for generate/create:
   --prompt <text>             (required) Generation prompt
-  --model <name>              Model alias or FAL model (default: renoise-2.0)
+  --model <name>              Model alias or OpenRouter model path (default: renoise-2.0)
   --duration <seconds>        Video duration (default: 5)
   --ratio <w:h>               Aspect ratio (default: 1:1)
   --resolution <1k|2k|4k>     Image resolution (image models)
@@ -523,13 +561,11 @@ Options for generate/create:
   --materials <spec>          Material refs: "id:role" or "id1:role1,id2:role2"
 
 Model aliases:
-  renoise-2.0         → fal-ai/minimax/video-01 (video, default)
-  renoise-2.0-fast    → fal-ai/minimax/video-01-lite (video)
-  nano-banana-2       → fal-ai/flux/dev (image)
-  nano-banana-pro     → fal-ai/flux-pro/v1.1 (image)
-  midjourney-v7       → fal-ai/ideogram/v2 (image)
-  gpt-image-2         → fal-ai/gpt-image-1 (image)
-  (any fal-ai/... path used directly)
+  renoise-2.0         → x-ai/grok-imagine-video (video, default)
+  renoise-2.0-fast    → kwaivgi/kling-v3.0-pro (video)
+  seedance-2.0        → bytedance/seedance-2.0 (video)
+  nano-banana-2       → google/gemini-3.1-flash-image-preview (image)
+  (any full OpenRouter model path used directly, e.g. bytedance/seedance-2.0)
 
 Examples:
   ironlabs task generate --prompt "a cat dancing" --duration 5
@@ -608,7 +644,7 @@ Commands:
   history                     Show credit transaction history (not available)
 
 Options for estimate:
-  --model <name>              Model alias or FAL model (default: renoise-2.0)
+  --model <name>              Model alias or OpenRouter model path (default: renoise-2.0)
   --duration <seconds>        Video duration for video models (default: 5)
 
 Examples:
@@ -711,10 +747,18 @@ async function taskChain(client, positional) {
   const ext = isVideo ? "mp4" : "png";
   const tmpPath = join(os.tmpdir(), `chain-${id}.${ext}`);
   console.log(`Downloading ${isVideo ? "video" : "image"} to ${tmpPath}...`);
-  const resp = await fetch(url);
-  if (!resp.ok) throw new Error(`Download failed: ${resp.status}`);
-  const arrayBuf = await resp.arrayBuffer();
-  writeFileSync(tmpPath, Buffer.from(arrayBuf));
+  // Video URLs from OpenRouter require gateway auth — use video_download connector
+  let arrayBuf;
+  if (isVideo) {
+    const dlResult = await client.mcpCall("openrouter", "video_download", { url });
+    if (!dlResult.data_base64) throw new Error("video_download returned no data");
+    arrayBuf = Buffer.from(dlResult.data_base64, "base64");
+  } else {
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error(`Download failed: ${resp.status}`);
+    arrayBuf = Buffer.from(await resp.arrayBuffer());
+  }
+  writeFileSync(tmpPath, arrayBuf);
   console.log(`Downloaded: ${(arrayBuf.byteLength / 1024 / 1024).toFixed(1)}MB`);
   const type = isVideo ? "video" : "image";
   const buffer = readFileSync(tmpPath);
@@ -936,16 +980,16 @@ async function main() {
   // credit estimate is pure local math — no API key needed
   if (domain === "credit" && action === "estimate") {
     const isImage = IMAGE_MODELS.has(flags.model || "");
-    const falModel = (isImage ? IMAGE_MODEL_MAP : VIDEO_MODEL_MAP)[flags.model] || flags.model ||
-      (isImage ? "fal-ai/flux/dev" : "fal-ai/minimax/video-01");
-    const pricing = FAL_PRICING[falModel];
+    const model = (isImage ? IMAGE_MODEL_MAP : VIDEO_MODEL_MAP)[flags.model] || flags.model ||
+      (isImage ? "black-forest-labs/flux-dev" : "bytedance/seedance-1.5");
+    const pricing = OR_PRICING[model];
     if (!pricing) {
-      json({ credits: 0, note: `No pricing data for ${falModel || "unknown model"}` });
+      json({ credits: 0, note: `No pricing data for ${model || "unknown model"}` });
     } else {
       const usd = pricing.type === "video"
         ? (parseInt(flags.duration) || 5) * pricing.perSecond
         : pricing.flat;
-      json({ credits: Math.ceil(usd * 100), usd: parseFloat(usd.toFixed(4)), model: falModel });
+      json({ credits: Math.ceil(usd * 100), usd: parseFloat(usd.toFixed(4)), model });
     }
     return;
   }

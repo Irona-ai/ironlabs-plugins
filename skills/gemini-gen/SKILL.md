@@ -21,11 +21,29 @@ Handles images and videos (≤20MB inline). Files > 20MB: extract frames first.
 
 **Auth**: `IRONLABS_API_KEY`. Get one at https://studio.ironlabs.ai → API Keys.
 
+## Image Input: Two Modes
+
+### Mode 1 — File path (runs the script)
+When the user provides a local file path, run the script directly:
+```bash
+node ${CLAUDE_SKILL_DIR}/scripts/gemini.mjs --file /path/to/image.jpg --mode product
+```
+
+### Mode 2 — Pasted image (use your own vision)
+When the user pastes an image inline in the chat **without a file path**, the image arrives
+as inline conversation data — you can see it, but the script cannot access the bytes.
+In this case, **analyze the image directly using your own vision** and format the output
+exactly as the relevant mode preset would (e.g. JSON for `product`/`style`, timestamped
+text for `video-script`). Do NOT ask the user to save the file first.
+
 ## Quick Start
 
 ```bash
-# Analyze a product photo
+# Analyze a product photo from a file
 node ${CLAUDE_SKILL_DIR}/scripts/gemini.mjs --file photo.jpg --mode product
+
+# Analyze from a base64 data URI (programmatic / script-to-script use)
+node ${CLAUDE_SKILL_DIR}/scripts/gemini.mjs --data-uri "data:image/jpeg;base64,..." --mode product
 
 # Extract a video script with timestamps
 node ${CLAUDE_SKILL_DIR}/scripts/gemini.mjs --file clip.mp4 --mode video-script
@@ -81,8 +99,11 @@ node ${CLAUDE_SKILL_DIR}/scripts/gemini.mjs --file reference.jpg --mode style
 # Text only
 node ${CLAUDE_SKILL_DIR}/scripts/gemini.mjs "Explain quantum computing"
 
-# Analyze an image
+# Analyze an image from a file
 node ${CLAUDE_SKILL_DIR}/scripts/gemini.mjs --file photo.jpg "Describe this product"
+
+# Analyze an image from an inline base64 data URI (e.g. pasted in chat)
+node ${CLAUDE_SKILL_DIR}/scripts/gemini.mjs --data-uri "data:image/jpeg;base64,..." --mode product
 
 # Multiple images
 node ${CLAUDE_SKILL_DIR}/scripts/gemini.mjs --file a.jpg --file b.jpg "Compare these two"
@@ -96,8 +117,9 @@ node ${CLAUDE_SKILL_DIR}/scripts/gemini.mjs --json "Return a JSON object with na
 | Flag                   | Default                    | Description                                     |
 | ---------------------- | -------------------------- | ----------------------------------------------- |
 | `--file <path>`        | —                          | Attach local file (repeatable, ≤20MB inline)    |
+| `--data-uri <uri>`     | —                          | Inline base64 data URI (repeatable, for pasted images) |
 | `--resolution <level>` | `medium`                   | Hint only: `low` / `medium` / `high` / `ultra_high` |
-| `--model <name>`       | `gemini-2.5-flash`  | OpenRouter model name                           |
+| `--model <name>`       | `gemini-2.5-flash`         | Irona model name                                |
 | `--temperature <n>`    | `1.0`                      | Temperature                                     |
 | `--max-tokens <n>`     | `8192`                     | Max output tokens                               |
 | `--json`               | off                        | Append JSON-only instruction to prompt          |
