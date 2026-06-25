@@ -8,7 +8,7 @@ AI video production skills by IronLabs — creative direction, generation, analy
 |-------|-------------|
 | **director** | Creative director — single entry point for all video creation (product ads, short films, TikTok e-commerce, drama, comedy) |
 | **gemini-gen** | Visual understanding & multimodal analysis via Gemini 2.5 Flash (product analysis, video script extraction, style extraction) |
-| **renoise-gen** | AI video & image generation engine — OpenRouter connector, material pool, product design sheets, scene backgrounds |
+| **ironlabs-gen** | AI video & image generation engine — OpenRouter connector, material pool, product design sheets, scene backgrounds |
 | **video-download** | Video downloader (yt-dlp + Douyin/TikTok fallback) |
 
 ## Installation

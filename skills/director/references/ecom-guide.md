@@ -141,7 +141,7 @@ node ${CLAUDE_PLUGIN_ROOT}/skills/gemini-gen/scripts/gemini.mjs \
   --file product.jpg --mode product
 
 # Generate — product image passed as local file (embedded as base64)
-bash ${CLAUDE_PLUGIN_ROOT}/skills/renoise-gen/scripts/video-gen.sh \
+bash ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/scripts/video-gen.sh \
   --prompt "<prompt>" \
   --duration 15 --ratio 9:16 \
   --materials "product.jpg:ref_image" \

@@ -147,14 +147,14 @@ For sequential segments, choose method based on scene goal:
 
 ```bash
 # Generate S1
-bash ${CLAUDE_PLUGIN_ROOT}/skills/renoise-gen/scripts/video-gen.sh \
+bash ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/scripts/video-gen.sh \
   --prompt "<S1 prompt>" --duration 15 --ratio 16:9
 
 # Extract tail frame
 ffmpeg -sseof -0.2 -i generated/shots/S1.mp4 -frames:v 1 -q:v 2 -y generated/keyframes/S1-end.jpg
 
 # S2 opens exactly where S1 ended
-bash ${CLAUDE_PLUGIN_ROOT}/skills/renoise-gen/scripts/video-gen.sh \
+bash ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/scripts/video-gen.sh \
   --prompt "Continuing from the previous shot: <S2 prompt>" \
   --duration 15 --ratio 16:9 \
   --materials "generated/keyframes/S1-end.jpg:first_frame"
@@ -165,7 +165,7 @@ bash ${CLAUDE_PLUGIN_ROOT}/skills/renoise-gen/scripts/video-gen.sh \
 - The transition is dynamic and a single extracted still is not enough
 
 ```bash
-bash ${CLAUDE_PLUGIN_ROOT}/skills/renoise-gen/scripts/video-gen.sh \
+bash ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/scripts/video-gen.sh \
   --prompt "Continuing from the previous shot: <S2 prompt>" \
   --duration 15 --ratio 16:9 \
   --materials "generated/shots/S1.mp4:ref_video"

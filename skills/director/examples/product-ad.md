@@ -68,7 +68,7 @@ curl -s "${IRONLABS_BASE_URL:-https://chat.irona.ai}/api/v1/chat/balance" \
   -H "Authorization: Bearer $IRONLABS_API_KEY" | jq '.balance'
 
 # Generate — product image passed as local file path (embedded as base64)
-bash ${CLAUDE_PLUGIN_ROOT}/skills/renoise-gen/scripts/video-gen.sh \
+bash ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/scripts/video-gen.sh \
   --prompt "<Video Prompt above>" \
   --duration 15 --ratio 9:16 \
   --materials "product.jpg:ref_image" \

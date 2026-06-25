@@ -158,12 +158,12 @@ The `content[0].text` is a JSON string — parse it to get the FAL result. Key f
 
 ---
 
-## FAL Model Aliases (renoise-cli.mjs)
+## FAL Model Aliases (ironlabs-cli.mjs)
 
 | Alias | FAL Model | Type |
 |-------|-----------|------|
-| `renoise-2.0` | `fal-ai/minimax/video-01` | Video (default) |
-| `renoise-2.0-fast` | `fal-ai/minimax/video-01-lite` | Video fast |
+| `ironlabs-2.0` | `fal-ai/minimax/video-01` | Video (default) |
+| `ironlabs-2.0-fast` | `fal-ai/minimax/video-01-lite` | Video fast |
 | `nano-banana-2` | `fal-ai/flux/dev` | Image (default) |
 | `nano-banana-pro` | `fal-ai/flux-pro/v1.1` | Image high fidelity |
 | `midjourney-v7` | `fal-ai/ideogram/v2` | Image artistic |
@@ -180,7 +180,7 @@ Pass any `fal-ai/...` path directly to skip aliasing.
 | `ref_image` | `first_frame_image_url` | Style reference (also used as first frame) |
 | `ref_video` | `reference_video_url` | Motion/style carryover |
 
-Materials are stored locally in `~/.ironlabs/materials/` as base64 by `renoise-cli.mjs`.
+Materials are stored locally in `~/.ironlabs/materials/` as base64 by `ironlabs-cli.mjs`.
 
 ## Aspect Ratios
 

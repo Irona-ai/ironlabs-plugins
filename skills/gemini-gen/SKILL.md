@@ -5,7 +5,7 @@ description: >
   (gemini-2.5-flash — no OpenRouter connector required). Handles product analysis,
   video script extraction, and style analysis from images and videos.
   Backend: POST /api/v1/chat/completions (SSE).
-  Do NOT use for generating images or videos — use renoise-gen for that.
+  Do NOT use for generating images or videos — use ironlabs-gen for that.
 allowed-tools: Bash, Read
 metadata:
   author: ironlabs
@@ -133,7 +133,7 @@ Files ≤20MB are sent inline as base64. For files >20MB (e.g., long videos):
 
 ## When to Use vs When Not
 
-| Use gemini-gen for | Use renoise-gen for |
+| Use gemini-gen for | Use ironlabs-gen for |
 |---|---|
 | Analyzing product photos | Generating images |
 | Understanding video content | Generating videos |

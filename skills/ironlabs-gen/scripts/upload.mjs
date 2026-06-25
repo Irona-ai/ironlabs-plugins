@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 
 /**
- * Upload a file for use with gemini-gen and renoise-gen material system.
+ * Upload a file for use with gemini-gen and ironlabs-gen material system.
  * Returns a base64 data URI to stdout (used inline in API requests).
  *
  * Backend change: returns base64 data URI instead of uploading to
- * Renoise gateway (was: POST https://renoise.ai/api/public/v1/llm/files/upload).
+ * IronLabs gateway (was: POST https://ironlabs.ai/api/public/v1/llm/files/upload).
  * The returned URI can be embedded directly in IronLabs API requests.
  *
  * Usage: node upload.mjs <file-path>

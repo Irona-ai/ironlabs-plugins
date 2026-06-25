@@ -1,9 +1,9 @@
 ---
-name: renoise-gen
+name: ironlabs-gen
 description: >
   AI video and image generation via IronLabs FAL MCP connector.
   Backend: POST /api/v1/ext/token → POST /api/v1/mcp/fal (fal_run tool).
-  Uses renoise-cli.mjs — same CLI interface as the Renoise plugin.
+  Uses ironlabs-cli.mjs — same CLI interface as the IronLabs plugin.
   This is the tool layer — for creative direction (story, prompts, anchoring),
   use the director skill.
   Use when user asks to "generate video", "create video", "text to video",
@@ -23,7 +23,7 @@ Video and image generation via IronLabs FAL connector. This skill covers **how t
 For creative decisions (story, prompts, anchoring strategy), see the **director** skill.
 
 **Backend**: `POST /api/v1/ext/token` → `POST /api/v1/mcp/fal` (fal_run tool)
-Uses `renoise-cli.mjs` — same CLI interface as the Renoise plugin, adapted for IronLabs.
+Uses `ironlabs-cli.mjs` — same CLI interface as the IronLabs plugin, adapted for IronLabs.
 
 **Auth**: `IRONLABS_API_KEY`. Get one at https://studio.ironlabs.ai → API Keys.
 The **Fal AI** external connector must be connected in IronLabs (**Settings → Connectors → Fal AI**).
@@ -35,18 +35,18 @@ Gemini analysis (material-ingest) uses Irona's LLM gateway directly — no addit
 
 ```bash
 # Text-to-Video — 10s
-node ${CLAUDE_SKILL_DIR}/renoise-cli.mjs task generate \
+node ${CLAUDE_SKILL_DIR}/ironlabs-cli.mjs task generate \
   --prompt "[0-5s] Close-up of a cat on the moon, slow push in. [5-10s] The cat dances under twinkling stars." \
   --duration 10 --ratio 16:9
 
 # Image-to-Video — upload a reference image, then generate
-MAT=$(node ${CLAUDE_SKILL_DIR}/renoise-cli.mjs material upload /path/to/photo.jpg | jq -r '.material.id')
-node ${CLAUDE_SKILL_DIR}/renoise-cli.mjs task generate \
+MAT=$(node ${CLAUDE_SKILL_DIR}/ironlabs-cli.mjs material upload /path/to/photo.jpg | jq -r '.material.id')
+node ${CLAUDE_SKILL_DIR}/ironlabs-cli.mjs task generate \
   --prompt "The product rotates slowly on a white pedestal, soft studio lighting, cinematic." \
   --materials "${MAT}:ref_image" --duration 10 --ratio 16:9
 
 # Generate Image
-node ${CLAUDE_SKILL_DIR}/renoise-cli.mjs task generate \
+node ${CLAUDE_SKILL_DIR}/ironlabs-cli.mjs task generate \
   --prompt "A cute cat sitting on a crescent moon, watercolor style, dreamy atmosphere" \
   --model nano-banana-2 --ratio 1:1
 ```
@@ -55,8 +55,8 @@ node ${CLAUDE_SKILL_DIR}/renoise-cli.mjs task generate \
 
 | Model alias | FAL model | Type | Notes |
 |-------------|-----------|------|-------|
-| `renoise-2.0` | `fal-ai/minimax/video-01` | Video | Default video |
-| `renoise-2.0-fast` | `fal-ai/minimax/video-01-lite` | Video | Fast video |
+| `ironlabs-2.0` | `fal-ai/minimax/video-01` | Video | Default video |
+| `ironlabs-2.0-fast` | `fal-ai/minimax/video-01-lite` | Video | Fast video |
 | `nano-banana-2` | `fal-ai/flux/dev` | Image | Default image |
 | `nano-banana-pro` | `fal-ai/flux-pro/v1.1` | Image | High fidelity |
 | `midjourney-v7` | `fal-ai/ideogram/v2` | Image | Artistic |
@@ -70,7 +70,7 @@ node ${CLAUDE_SKILL_DIR}/renoise-cli.mjs task generate \
 ### Video Generation
 
 ```bash
-node ${CLAUDE_SKILL_DIR}/renoise-cli.mjs task generate \
+node ${CLAUDE_SKILL_DIR}/ironlabs-cli.mjs task generate \
   --prompt "..." --duration 10 --ratio 16:9 \
   [--materials "<mat-id:role,...>"] [--model <model>] [--tags "project-x"]
 ```
@@ -83,13 +83,13 @@ node ${CLAUDE_SKILL_DIR}/renoise-cli.mjs task generate \
 | `--duration` | Video duration 5–10s | `5` |
 | `--ratio` | Aspect ratio: 16:9, 9:16, 1:1, 4:3, 3:4 | `1:1` |
 | `--materials` | Comma-separated `<mat-id:role>` pairs | — |
-| `--model` | Model alias or FAL path | `renoise-2.0` |
+| `--model` | Model alias or FAL path | `ironlabs-2.0` |
 | `--tags` | Project tags | — |
 
 ### Image Generation
 
 ```bash
-node ${CLAUDE_SKILL_DIR}/renoise-cli.mjs task generate \
+node ${CLAUDE_SKILL_DIR}/ironlabs-cli.mjs task generate \
   --prompt "..." --model nano-banana-2 --ratio 16:9
 ```
 
@@ -107,17 +107,17 @@ First upload a file to get a material ID, then reference it by ID.
 
 ```bash
 # Upload material first
-MAT=$(node ${CLAUDE_SKILL_DIR}/renoise-cli.mjs material upload scene.jpg | jq -r '.material.id')
+MAT=$(node ${CLAUDE_SKILL_DIR}/ironlabs-cli.mjs material upload scene.jpg | jq -r '.material.id')
 
 # With reference image
-node ${CLAUDE_SKILL_DIR}/renoise-cli.mjs task generate \
+node ${CLAUDE_SKILL_DIR}/ironlabs-cli.mjs task generate \
   --prompt "..." --duration 10 --ratio 16:9 \
   --materials "${MAT}:ref_image"
 
 # With multiple references
-MAT1=$(node ${CLAUDE_SKILL_DIR}/renoise-cli.mjs material upload char.jpg | jq -r '.material.id')
-MAT2=$(node ${CLAUDE_SKILL_DIR}/renoise-cli.mjs material upload scene.jpg | jq -r '.material.id')
-node ${CLAUDE_SKILL_DIR}/renoise-cli.mjs task generate \
+MAT1=$(node ${CLAUDE_SKILL_DIR}/ironlabs-cli.mjs material upload char.jpg | jq -r '.material.id')
+MAT2=$(node ${CLAUDE_SKILL_DIR}/ironlabs-cli.mjs material upload scene.jpg | jq -r '.material.id')
+node ${CLAUDE_SKILL_DIR}/ironlabs-cli.mjs task generate \
   --prompt "..." --duration 10 --ratio 16:9 \
   --materials "${MAT1}:ref_image,${MAT2}:ref_image"
 ```

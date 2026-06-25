@@ -91,8 +91,8 @@ const OR_PRICING = {
 
 // OpenRouter model aliases (keyed by friendly name → OR model id)
 const VIDEO_MODEL_MAP = {
-  "renoise-2.0":      "x-ai/grok-imagine-video",
-  "renoise-2.0-fast": "kwaivgi/kling-v3.0-pro",
+  "ironlabs-2.0":      "x-ai/grok-imagine-video",
+  "ironlabs-2.0-fast": "kwaivgi/kling-v3.0-pro",
   "youmeng-2.0":      "bytedance/seedance-2.0",
   "seedance-2.0":     "bytedance/seedance-2.0",
   "sd-2.0":           "bytedance/seedance-2.0",
@@ -553,7 +553,7 @@ Commands:
 
 Options for generate/create:
   --prompt <text>             (required) Generation prompt
-  --model <name>              Model alias or OpenRouter model path (default: renoise-2.0)
+  --model <name>              Model alias or OpenRouter model path (default: ironlabs-2.0)
   --duration <seconds>        Video duration (default: 5)
   --ratio <w:h>               Aspect ratio (default: 1:1)
   --resolution <1k|2k|4k>     Image resolution (image models)
@@ -561,8 +561,8 @@ Options for generate/create:
   --materials <spec>          Material refs: "id:role" or "id1:role1,id2:role2"
 
 Model aliases:
-  renoise-2.0         → x-ai/grok-imagine-video (video, default)
-  renoise-2.0-fast    → kwaivgi/kling-v3.0-pro (video)
+  ironlabs-2.0         → x-ai/grok-imagine-video (video, default)
+  ironlabs-2.0-fast    → kwaivgi/kling-v3.0-pro (video)
   seedance-2.0        → bytedance/seedance-2.0 (video)
   nano-banana-2       → google/gemini-3.1-flash-image-preview (image)
   (any full OpenRouter model path used directly, e.g. bytedance/seedance-2.0)
@@ -644,12 +644,12 @@ Commands:
   history                     Show credit transaction history (not available)
 
 Options for estimate:
-  --model <name>              Model alias or OpenRouter model path (default: renoise-2.0)
+  --model <name>              Model alias or OpenRouter model path (default: ironlabs-2.0)
   --duration <seconds>        Video duration for video models (default: 5)
 
 Examples:
   ironlabs credit me
-  ironlabs credit estimate --model renoise-2.0 --duration 10
+  ironlabs credit estimate --model ironlabs-2.0 --duration 10
   ironlabs credit estimate --model nano-banana-2
 `.trim();
 async function taskGenerate(client, flags) {

@@ -45,7 +45,7 @@ No text labels. No background elements.
 
 **Generate:**
 ```bash
-bash ${CLAUDE_PLUGIN_ROOT}/skills/renoise-gen/scripts/video-gen.sh \
+bash ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/scripts/video-gen.sh \
   --image --ratio 16:9 \
   --prompt "<character sheet prompt>" \
   --tags "<project>,char-<name>"
@@ -59,7 +59,7 @@ bash ${CLAUDE_PLUGIN_ROOT}/skills/renoise-gen/scripts/video-gen.sh \
 If the user provides reference images, product photos, or footage:
 
 ```bash
-node ${CLAUDE_PLUGIN_ROOT}/skills/renoise-gen/scripts/material-ingest.mjs <paths-or-directory>
+node ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/scripts/material-ingest.mjs <paths-or-directory>
 ```
 
 This analyzes files (tags, descriptions, face detection) and outputs `material-pool.json`. Use `match-materials.mjs` to map pool entries to your shots before generating.
@@ -74,7 +74,7 @@ Scene images must NOT contain human faces.
 
 **Generate one scene ref per segment:**
 ```bash
-bash ${CLAUDE_PLUGIN_ROOT}/skills/renoise-gen/scripts/video-gen.sh \
+bash ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/scripts/video-gen.sh \
   --image --ratio 16:9 \
   --prompt "<scene description, environment only, no people. Include: location, time of day, lighting, color palette, key props, atmosphere. Photorealistic, cinematic composition.>" \
   --tags "<project>,scene-s<N>"

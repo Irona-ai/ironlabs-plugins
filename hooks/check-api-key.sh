@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# PreToolUse hook: block renoise-cli.mjs calls when IRONLABS_API_KEY is not set.
+# PreToolUse hook: block ironlabs-cli.mjs calls when IRONLABS_API_KEY is not set.
 
 set -euo pipefail
 
@@ -7,8 +7,8 @@ INPUT=$(cat)
 
 COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command // empty')
 
-# Only check commands that invoke renoise-cli.mjs
-if [[ "$COMMAND" != *renoise-cli.mjs* ]]; then
+# Only check commands that invoke ironlabs-cli.mjs
+if [[ "$COMMAND" != *ironlabs-cli.mjs* ]]; then
   exit 0
 fi
 

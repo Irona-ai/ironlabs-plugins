@@ -111,7 +111,7 @@ No music. No voiceover. No subtitles. No text. Diegetic audio only.
 When you attach reference images as `--materials`, describe them in the prompt so the model knows which image maps to which character or object.
 
 ```bash
-bash ${CLAUDE_PLUGIN_ROOT}/skills/renoise-gen/scripts/video-gen.sh \
+bash ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/scripts/video-gen.sh \
   --prompt "<prompt>" --duration 15 --ratio 16:9 \
   --materials "assets/char-woman.jpg:ref_image,assets/scene-hallway.jpg:ref_image"
 ```

@@ -141,7 +141,7 @@ Tell the user:
 >
 > The following skills will be available:
 > - `director` — AI video creative director (entry point for all video creation)
-> - `renoise-gen` — video and image generation via Fal AI
+> - `ironlabs-gen` — video and image generation via Fal AI
 > - `gemini-gen` — visual analysis and multimodal understanding via Gemini
 > - `video-download` — download videos from YouTube, TikTok, and 1000+ platforms
 >
@@ -149,5 +149,5 @@ Tell the user:
 >
 > | Skill | Connector | What it enables |
 > |-------|-----------|-----------------|
-> | `renoise-gen`, `director` | Fal AI | Video and image generation |
+> | `ironlabs-gen`, `director` | Fal AI | Video and image generation |
 > | `gemini-gen`, `director` | OpenRouter | Visual analysis via Gemini 2.5 Flash |

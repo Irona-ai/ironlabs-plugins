@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Batch video generation for short film projects.
-# Reads a prompts JSON file and sequentially submits each shot via renoise-cli.mjs.
+# Reads a prompts JSON file and sequentially submits each shot via ironlabs-cli.mjs.
 #
 # Usage:
 #   bash batch-generate.sh --project <project-id> --ratio <ratio> --prompts-file <prompts.json>
@@ -12,7 +12,7 @@
 #     { "shot_id": "S2", "prompt": "...", "duration": 10, "materials": "1234567890:ref_image" },
 #     ...
 #   ]
-# The "materials" field is optional. Format: "<material-id:role,...>" (material IDs from renoise-cli.mjs material upload).
+# The "materials" field is optional. Format: "<material-id:role,...>" (material IDs from ironlabs-cli.mjs material upload).
 #
 # Environment:
 #   IRONLABS_API_KEY      Required
@@ -21,7 +21,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CLI="node ${SCRIPT_DIR}/../../renoise-gen/renoise-cli.mjs"
+CLI="node ${SCRIPT_DIR}/../../ironlabs-gen/ironlabs-cli.mjs"
 
 # ---- Parse args ----
 PROJECT=""

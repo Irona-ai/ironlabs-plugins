@@ -35,7 +35,7 @@ You are a creative director for AI video production. Default language: English. 
 - Characters in 2+ segments: copy the full character description verbatim in every prompt. No abbreviation.
 - Human faces as `ref_image` may trigger privacy detection in some FAL models. If blocked, describe the character in text only and use a generated portrait (no real faces) as reference.
 - Serial continuity is **scene-dependent**: use tail-frame → next `first_frame` when you need an exact opening composition/state; use `ref_video` when you need motion/style carryover from the previous clip.
-- Read video model capabilities before every prompt session: `Read ${CLAUDE_PLUGIN_ROOT}/skills/renoise-gen/references/video-capabilities.md`
+- Read video model capabilities before every prompt session: `Read ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/references/video-capabilities.md`
 
 ---
 
@@ -73,7 +73,7 @@ Do NOT describe product appearance in the prompt — it comes from the reference
 
 **Balance check** before generating:
 ```bash
-node ${CLAUDE_PLUGIN_ROOT}/skills/renoise-gen/renoise-cli.mjs credit me
+node ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/ironlabs-cli.mjs credit me
 ```
 Estimate: ~300 credits per 10s clip, ~50 per character sheet image. Inform user if budget is tight vs. plan.
 
@@ -107,7 +107,7 @@ Use the returned JSON to populate selling points, model dialogue, and scene sugg
 
 2. **Upload product image** as material:
 ```bash
-node ${CLAUDE_PLUGIN_ROOT}/skills/renoise-gen/renoise-cli.mjs material upload <product-image>
+node ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/ironlabs-cli.mjs material upload <product-image>
 # → prints material ID, e.g. 194
 ```
 
@@ -115,8 +115,8 @@ node ${CLAUDE_PLUGIN_ROOT}/skills/renoise-gen/renoise-cli.mjs material upload <p
 
 4. **Generate** with product image anchored:
 ```bash
-node ${CLAUDE_PLUGIN_ROOT}/skills/renoise-gen/renoise-cli.mjs task generate \
-  --prompt "<ecom prompt>" --model renoise-2.0 --duration 10 --ratio 9:16 \
+node ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/ironlabs-cli.mjs task generate \
+  --prompt "<ecom prompt>" --model ironlabs-2.0 --duration 10 --ratio 9:16 \
   --materials "194:ref_image" --tags "ecom"
 ```
 
@@ -194,17 +194,17 @@ S4    Maya + new location (café)                       "201:ref_image,204:ref_i
 **Generate a character sheet and upload it:**
 ```bash
 # 1. Generate character sheet with nano-banana-2
-node ${CLAUDE_PLUGIN_ROOT}/skills/renoise-gen/renoise-cli.mjs task generate \
+node ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/ironlabs-cli.mjs task generate \
   --model nano-banana-2 --resolution 2k --ratio 16:9 \
   --prompt "<character sheet prompt: full body, neutral pose, white background, front-facing>"
 
 # 2. Download and upload as material
 curl -s -o char.png "<image_url_from_result>"
-node ${CLAUDE_PLUGIN_ROOT}/skills/renoise-gen/renoise-cli.mjs material upload char.png
+node ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/ironlabs-cli.mjs material upload char.png
 # → prints material ID, e.g. 101
 
 # 3. Use in generation
-node ${CLAUDE_PLUGIN_ROOT}/skills/renoise-gen/renoise-cli.mjs task generate \
+node ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/ironlabs-cli.mjs task generate \
   --prompt "<scene prompt with full character description in text>" \
   --materials "101:ref_image" --duration 10 --ratio 16:9
 ```
@@ -217,7 +217,7 @@ node ${CLAUDE_PLUGIN_ROOT}/skills/renoise-gen/renoise-cli.mjs task generate \
 
 **Single clip:**
 ```bash
-node ${CLAUDE_PLUGIN_ROOT}/skills/renoise-gen/renoise-cli.mjs task generate \
+node ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/ironlabs-cli.mjs task generate \
   --prompt "<prompt>" --duration 10 --ratio <ratio> \
   [--materials "MAT_ID:ref_image"] [--tags "project-tag"]
 ```
@@ -225,7 +225,7 @@ node ${CLAUDE_PLUGIN_ROOT}/skills/renoise-gen/renoise-cli.mjs task generate \
 **Serial continuity option A — exact opening frame:**
 ```bash
 # S1: generate the first segment
-node ${CLAUDE_PLUGIN_ROOT}/skills/renoise-gen/renoise-cli.mjs task generate \
+node ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/ironlabs-cli.mjs task generate \
   --prompt "<S1 prompt>" --duration 10 --ratio <ratio> \
   --materials "CHAR_MAT_ID:ref_image,SCENE1_MAT_ID:ref_image"
 
@@ -233,9 +233,9 @@ node ${CLAUDE_PLUGIN_ROOT}/skills/renoise-gen/renoise-cli.mjs task generate \
 ffmpeg -sseof -0.2 -i generated/shots/S1.mp4 -frames:v 1 -q:v 2 -y generated/keyframes/S1-end.jpg
 
 # Upload the extracted frame and use it as S2 first_frame
-node ${CLAUDE_PLUGIN_ROOT}/skills/renoise-gen/renoise-cli.mjs material upload generated/keyframes/S1-end.jpg
+node ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/ironlabs-cli.mjs material upload generated/keyframes/S1-end.jpg
 # → returns material ID, e.g. 91
-node ${CLAUDE_PLUGIN_ROOT}/skills/renoise-gen/renoise-cli.mjs task generate \
+node ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/ironlabs-cli.mjs task generate \
   --prompt "Continuing from the previous shot: <S2 prompt>" --duration 10 --ratio <ratio> \
   --materials "CHAR_MAT_ID:ref_image,91:first_frame,SCENE2_MAT_ID:ref_image"
 ```
@@ -243,11 +243,11 @@ node ${CLAUDE_PLUGIN_ROOT}/skills/renoise-gen/renoise-cli.mjs task generate \
 **Serial continuity option B — motion/style carryover:**
 ```bash
 # Chain S1 output → material in one step (download + upload)
-node ${CLAUDE_PLUGIN_ROOT}/skills/renoise-gen/renoise-cli.mjs task chain <S1_TASK_ID>
+node ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/ironlabs-cli.mjs task chain <S1_TASK_ID>
 # → prints material ID for ref_video
 
 # S2: character ref + ref_video (S1) + scene ref
-node ${CLAUDE_PLUGIN_ROOT}/skills/renoise-gen/renoise-cli.mjs task generate \
+node ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/ironlabs-cli.mjs task generate \
   --prompt "Continuing from the previous shot: <S2 prompt>" --duration 10 --ratio <ratio> \
   --materials "CHAR_MAT_ID:ref_image,S1_MAT_ID:ref_video,SCENE2_MAT_ID:ref_image"
 ```
@@ -272,7 +272,7 @@ ffmpeg -i silent.mp4 -i bgm.mp3 -c:v copy -c:a aac -shortest final-with-bgm.mp4
 
 **Check balance:**
 ```bash
-node ${CLAUDE_PLUGIN_ROOT}/skills/renoise-gen/renoise-cli.mjs credit me
+node ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/ironlabs-cli.mjs credit me
 ```
 
 ---
