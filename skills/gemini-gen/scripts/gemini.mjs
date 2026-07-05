@@ -98,7 +98,7 @@ function parseArgs(argv) {
   const dataUris = [];
   let resolution = "medium";
   let mode = null;
-  let model = "gemini-2.5-flash";
+  let model = "google/gemini-2.5-flash";
   let temperature = 1.0;
   let maxTokens = 8192;
   let jsonMode = false;

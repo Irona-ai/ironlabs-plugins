@@ -171,8 +171,14 @@ var IronlabsClient = class {
   }
   // ---- Credit ----
   async getMe() {
-    const data = await this.request("GET", "/chat/balance");
-    const balance = data.data?.totalBalance ?? data.balance ?? 0;
+    const studioUrl = (process.env.IRONLABS_STUDIO_URL ?? "https://studio.ironlabs.ai").replace(/\/$/, "");
+    const res = await fetch(`${studioUrl}/api/v1/balance`, {
+      headers: { Authorization: `Bearer ${this.apiKey}` },
+    });
+    if (res.status === 401) throw new AuthError({});
+    const data = await res.json();
+    const raw = data.data?.topupBalance ?? 0;
+    const balance = typeof raw === "string" ? parseFloat(raw) : raw;
     return { user: { id: "ironlabs-user", balance }, balance };
   }
   async estimateCost(params = {}) {

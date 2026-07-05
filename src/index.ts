@@ -61,10 +61,14 @@ async function main() {
   const previousOutput = runPreviousStatusLine(stdinData)
 
   // Get balance from local file cache (fast, no network)
-  const { data, fresh } = getBalance()
+  let { data, fresh } = getBalance()
 
-  // If cache is stale or empty, fire async refresh (non-blocking)
-  if (!fresh) {
+  // If no cache at all, wait for a live fetch before rendering
+  if (!data) {
+    await refreshFromApi().catch(() => {})
+    data = getBalance().data
+  } else if (!fresh) {
+    // Cache exists but stale — refresh in background, render immediately
     refreshFromApi().catch(() => {})
   }
 
