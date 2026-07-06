@@ -49,26 +49,24 @@ export function getBalance(): { data: BalanceData | null; fresh: boolean } {
 }
 
 /**
- * Fetch real balance from IronLabs Studio API and update cache.
- * Uses IRONLABS_STUDIO_URL for auth/balance — separate from the chat/skills URL.
+ * Fetch real balance from IronLabs API and update cache.
  * Non-blocking — fire and forget.
  */
 export async function refreshFromApi(): Promise<void> {
   const apiKey = process.env.IRONLABS_API_KEY
   if (!apiKey) return
 
-  const studioUrl = (process.env.IRONLABS_STUDIO_URL ?? 'https://studio.ironlabs.ai').replace(/\/$/, '')
+  const baseUrl = process.env.IRONLABS_BASE_URL ?? 'https://chat.irona.ai'
 
-  const res = await fetch(`${studioUrl}/api/v1/balance`, {
+  const res = await fetch(`${baseUrl}/api/v1/chat/balance`, {
     headers: { Authorization: `Bearer ${apiKey}` },
     signal: AbortSignal.timeout(5000),
   })
   if (!res.ok) return
 
-  const json = await res.json() as { data?: { topupBalance?: string | number } }
-  const raw = json.data?.topupBalance
-  const balance = typeof raw === 'string' ? parseFloat(raw) : raw
-  if (typeof balance === 'number' && !isNaN(balance)) {
+  const json = await res.json() as { data?: { totalBalance?: number } }
+  const balance = json.data?.totalBalance
+  if (typeof balance === 'number') {
     writeCache(balance)
   }
 }
