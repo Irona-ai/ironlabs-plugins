@@ -1,9 +1,9 @@
 {
   "name": "ironlabs",
   "description": "AI video production skills — creative direction, generation, editing, and e-commerce content",
-  "version": "0.2.0",
+  "version": "0.1.0",
   "author": { "name": "IronLabs AI" },
-  "homepage": "https://chat.irona.ai",
+  "homepage": "https://www.chat.ironlabs.ai/",
   "repository": "https://github.com/IronLabsAI/ironlabs-plugin",
   "keywords": ["skills", "video", "ai-video", "creative-direction", "ecommerce", "tiktok", "ironlabs-ai"],
   "commands": [

@@ -11,7 +11,7 @@ Output (JSON to stdout):
   { bpm, beats, sections, cut_points }
 
 Dependencies:
-  pip install librosa numpy soundfile
+  pip install librosa numpy soundfile scipy
 """
 
 import sys
@@ -22,8 +22,9 @@ try:
     import librosa
     import numpy as np
     import soundfile as sf
+    from scipy.signal import find_peaks
 except ImportError:
-    print(json.dumps({"error": "Missing deps — run: pip install librosa numpy soundfile"}))
+    print(json.dumps({"error": "Missing deps — run: pip install librosa numpy soundfile scipy"}))
     sys.exit(1)
 
 
@@ -34,7 +35,8 @@ def analyze(audio_path: str, min_seg: float, max_seg: float) -> dict:
     # Beat tracking
     tempo, beat_frames = librosa.beat.beat_track(y=y, sr=sr)
     beat_times = librosa.frames_to_time(beat_frames, sr=sr).tolist()
-    bpm = float(np.round(tempo, 1))
+    # librosa >=0.10 returns tempo as an ndarray instead of a scalar
+    bpm = round(float(np.ravel(tempo)[0]), 1)
 
     # Section boundaries via spectral novelty
     hop_length = 512
@@ -42,7 +44,6 @@ def analyze(audio_path: str, min_seg: float, max_seg: float) -> dict:
     novelty = np.diff(mfcc, axis=1)
     novelty_curve = np.sqrt((novelty ** 2).sum(axis=0))
     # Smooth and find peaks
-    from scipy.signal import find_peaks  # type: ignore
     novelty_smooth = np.convolve(novelty_curve, np.ones(20) / 20, mode="same")
     peak_frames, _ = find_peaks(novelty_smooth, distance=sr // hop_length * 5)
     section_times = librosa.frames_to_time(peak_frames, sr=sr).tolist()

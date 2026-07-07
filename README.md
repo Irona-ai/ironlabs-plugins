@@ -27,12 +27,6 @@ claude plugin marketplace add IronLabsAI/ironlabs-plugin
 claude plugin install ironlabs@ironlabs-plugin
 ```
 
-### OpenClaw
-
-```bash
-openclaw plugins install @ironlabs/plugin
-```
-
 3. Launch Claude Code and run the setup command to connect your IronLabs account:
 
 ```
@@ -41,9 +35,17 @@ openclaw plugins install @ironlabs/plugin
 
 This will guide you through connecting your API key and enabling the real-time balance display in the status bar.
 
+### OpenClaw
+
+```bash
+openclaw plugins install @ironlabs/plugin
+```
+
+Then run `/ironlabs:setup` the same way to connect your IronLabs account.
+
 ## Environment Variables
 
 | Variable | Required By | Description |
 |----------|------------|-------------|
 | `IRONLABS_API_KEY` | All skills | IronLabs API key. Get one at https://studio.ironlabs.ai → API Keys |
-| `IRONLABS_BASE_URL` | All skills | Optional. Override API base URL (e.g. for staging: `https://stg-chat.irona.ai`) |
+| `IRONLABS_BASE_URL` | All skills | Optional. Override API base URL |

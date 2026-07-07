@@ -16,7 +16,7 @@
 #
 # Environment:
 #   IRONLABS_API_KEY      Required
-#   IRONLABS_BASE_URL     Optional (default: https://chat.irona.ai/api/v1)
+#   IRONLABS_BASE_URL     Optional (default: https://www.chat.ironlabs.ai/api/v1)
 
 set -euo pipefail
 

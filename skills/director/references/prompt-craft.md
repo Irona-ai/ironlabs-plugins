@@ -111,9 +111,12 @@ No music. No voiceover. No subtitles. No text. Diegetic audio only.
 When you attach reference images as `--materials`, describe them in the prompt so the model knows which image maps to which character or object.
 
 ```bash
-bash ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/scripts/video-gen.sh \
+CLI=${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/ironlabs-cli.mjs
+CHAR=$(node "$CLI" material upload assets/char-woman.jpg | jq -r '.material.id')
+SCENE=$(node "$CLI" material upload assets/scene-hallway.jpg | jq -r '.material.id')
+node "$CLI" task generate \
   --prompt "<prompt>" --duration 15 --ratio 16:9 \
-  --materials "assets/char-woman.jpg:ref_image,assets/scene-hallway.jpg:ref_image"
+  --materials "${CHAR}:ref_image,${SCENE}:ref_image"
 ```
 
 In the prompt, describe each material by its role:

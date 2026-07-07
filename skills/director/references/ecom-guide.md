@@ -136,15 +136,18 @@ Background music: [genre/mood], [tempo], [energy level].
 ## Generation
 
 ```bash
+CLI=${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/ironlabs-cli.mjs
+
 # Analyze product image first
 node ${CLAUDE_PLUGIN_ROOT}/skills/gemini-gen/scripts/gemini.mjs \
   --file product.jpg --mode product
 
-# Generate — product image passed as local file (embedded as base64)
-bash ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/scripts/video-gen.sh \
+# Upload the product image, then generate
+PRODUCT=$(node "$CLI" material upload product.jpg | jq -r '.material.id')
+node "$CLI" task generate \
   --prompt "<prompt>" \
   --duration 15 --ratio 9:16 \
-  --materials "product.jpg:ref_image" \
+  --materials "${PRODUCT}:ref_image" \
   --tags "ecom,<brand>"
 ```
 

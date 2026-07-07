@@ -49,26 +49,26 @@ export function getBalance(): { data: BalanceData | null; fresh: boolean } {
 }
 
 /**
- * Fetch real balance from IronLabs Studio API and update cache.
- * Uses IRONLABS_STUDIO_URL for auth/balance — separate from the chat/skills URL.
+ * Fetch real balance from IronLabs API and update cache.
  * Non-blocking — fire and forget.
  */
 export async function refreshFromApi(): Promise<void> {
   const apiKey = process.env.IRONLABS_API_KEY
   if (!apiKey) return
 
-  const studioUrl = (process.env.IRONLABS_STUDIO_URL ?? 'https://studio.ironlabs.ai').replace(/\/$/, '')
+  const baseUrl = (process.env.IRONLABS_BASE_URL ?? 'https://www.chat.ironlabs.ai/api/v1').replace(/\/$/, '')
 
-  const res = await fetch(`${studioUrl}/api/v1/balance`, {
+  const res = await fetch(`${baseUrl}/chat/balance`, {
     headers: { Authorization: `Bearer ${apiKey}` },
     signal: AbortSignal.timeout(5000),
   })
   if (!res.ok) return
 
-  const json = await res.json() as { data?: { topupBalance?: string | number } }
-  const raw = json.data?.topupBalance
-  const balance = typeof raw === 'string' ? parseFloat(raw) : raw
-  if (typeof balance === 'number' && !isNaN(balance)) {
-    writeCache(balance)
+  const json = await res.json() as { data?: { totalBalance?: string | number }, balance?: string | number }
+  const raw = json.data?.totalBalance ?? json.balance
+  const dollars = typeof raw === 'string' ? parseFloat(raw) : raw
+  if (typeof dollars === 'number' && !isNaN(dollars)) {
+    // totalBalance is denominated in dollars — convert to cents to match BalanceData's contract.
+    writeCache(Math.round(dollars * 100))
   }
 }

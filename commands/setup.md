@@ -42,7 +42,7 @@ If it outputs `SET`, skip to Step 3.
 ## Step 3: Verify the Connection
 
 ```bash
-curl -s "${IRONLABS_BASE_URL:-https://chat.irona.ai}/api/v1/chat/model" \
+curl -s "${IRONLABS_BASE_URL:-https://www.chat.ironlabs.ai}/api/v1/chat/model" \
   -H "Authorization: Bearer ${IRONLABS_API_KEY}" | head -c 200
 ```
 
@@ -50,7 +50,7 @@ A successful response is a JSON array. If you get a `401`, the key is invalid �
 
 ## Step 4: Optional — Set a Custom Base URL
 
-Ask the user if they want to connect to a staging or self-hosted instance instead of `https://chat.irona.ai`.
+Ask the user if they want to connect to a staging or self-hosted instance instead of `https://www.chat.ironlabs.ai/`.
 
 If yes, use AskUserQuestion to collect the base URL, then save it alongside the API key:
 
@@ -114,7 +114,11 @@ Read `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json`.
    ```json
    { "command": "<existing statusLine command>" }
    ```
-   Create the `~/.ironlabs/` directory if needed.
+   Create the `~/.ironlabs/` directory if needed. This command is re-executed via shell on
+   every status refresh (see `src/index.ts`), so restrict the file to the current user:
+   ```bash
+   chmod 600 ~/.ironlabs/previous-statusline.json
+   ```
 2. Tell the user: "Your existing statusLine will be preserved and merged with the IronLabs credit display."
 
 **Then** merge in our statusLine config, preserving all other existing settings:
@@ -141,7 +145,7 @@ Tell the user:
 >
 > The following skills will be available:
 > - `director` — AI video creative director (entry point for all video creation)
-> - `ironlabs-gen` — video and image generation via Fal AI
+> - `ironlabs-gen` — video and image generation via OpenRouter
 > - `gemini-gen` — visual analysis and multimodal understanding via Gemini
 > - `video-download` — download videos from YouTube, TikTok, and 1000+ platforms
 >
@@ -149,5 +153,6 @@ Tell the user:
 >
 > | Skill | Connector | What it enables |
 > |-------|-----------|-----------------|
-> | `ironlabs-gen`, `director` | Fal AI | Video and image generation |
-> | `gemini-gen`, `director` | OpenRouter | Visual analysis via Gemini 2.5 Flash |
+> | `ironlabs-gen`, `director` | OpenRouter | Video/image generation |
+>
+> `gemini-gen` needs no external connector — it runs natively through Irona's LLM gateway.

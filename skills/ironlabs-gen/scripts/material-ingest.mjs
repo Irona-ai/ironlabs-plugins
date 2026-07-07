@@ -14,12 +14,12 @@
  *
  * Environment:
  *   IRONLABS_API_KEY   Required (for Gemini analysis via Irona gateway)
- *   IRONLABS_BASE_URL  Optional (default: https://chat.irona.ai)
+ *   IRONLABS_BASE_URL  Optional (default: https://www.chat.ironlabs.ai/)
  */
 
 import fs from "fs";
 import path from "path";
-import { execSync } from "child_process";
+import { execFileSync } from "child_process";
 import { fileURLToPath } from "url";
 import { createHash } from "crypto";
 
@@ -95,8 +95,9 @@ Return ONLY valid JSON (no markdown fences) with these fields:
 - suitable_roles: array from ["ref_image", "image1", "image2", "ref_video", "first_frame", "last_frame"]`;
 
   try {
-    const output = execSync(
-      `node "${GEMINI_PATH}" --file "${filePath}" --resolution ${resolution} --json '${prompt.replace(/'/g, "'\\''")}'`,
+    const output = execFileSync(
+      process.execPath,
+      [GEMINI_PATH, "--file", filePath, "--resolution", resolution, "--json", prompt],
       { encoding: "utf-8", timeout: 120000 }
     );
     const jsonMatch = output.match(/\{[\s\S]*\}/);

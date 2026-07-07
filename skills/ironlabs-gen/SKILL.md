@@ -1,8 +1,9 @@
 ---
 name: ironlabs-gen
 description: >
-  AI video and image generation via IronLabs FAL MCP connector.
-  Backend: POST /api/v1/ext/token → POST /api/v1/mcp/fal (fal_run tool).
+  AI video and image generation via IronLabs OpenRouter MCP connector.
+  Backend: POST /api/v1/ext/token → POST /api/v1/mcp/openrouter (image_generate /
+  video_submit / video_status tools).
   Uses ironlabs-cli.mjs — same CLI interface as the IronLabs plugin.
   This is the tool layer — for creative direction (story, prompts, anchoring),
   use the director skill.
@@ -14,20 +15,20 @@ metadata:
   author: ironlabs
   version: 0.1.0
   category: video-production
-  tags: [video-generation, image-generation, fal, material-pool]
+  tags: [video-generation, image-generation, openrouter, material-pool]
 ---
 
 # IronLabs Video/Image Gen — Tool Reference
 
-Video and image generation via IronLabs FAL connector. This skill covers **how to use the tools**.
+Video and image generation via IronLabs OpenRouter connector. This skill covers **how to use the tools**.
 For creative decisions (story, prompts, anchoring strategy), see the **director** skill.
 
-**Backend**: `POST /api/v1/ext/token` → `POST /api/v1/mcp/fal` (fal_run tool)
+**Backend**: `POST /api/v1/ext/token` → `POST /api/v1/mcp/openrouter` (`image_generate`, `video_submit`, `video_status` tools)
 Uses `ironlabs-cli.mjs` — same CLI interface as the IronLabs plugin, adapted for IronLabs.
 
 **Auth**: `IRONLABS_API_KEY`. Get one at https://studio.ironlabs.ai → API Keys.
-The **Fal AI** external connector must be connected in IronLabs (**Settings → Connectors → Fal AI**).
-Gemini analysis (material-ingest) uses Irona's LLM gateway directly — no additional connector needed.
+The **OpenRouter** external connector must be connected in IronLabs (**Settings → Connectors → OpenRouter**).
+Gemini analysis (material-ingest) shells out to `gemini-gen`'s script, which runs natively via Irona's LLM gateway — no OpenRouter connector or additional setup needed.
 
 ---
 
@@ -53,15 +54,16 @@ node ${CLAUDE_SKILL_DIR}/ironlabs-cli.mjs task generate \
 
 ## Supported Models
 
-| Model alias | FAL model | Type | Notes |
-|-------------|-----------|------|-------|
-| `ironlabs-2.0` | `fal-ai/minimax/video-01` | Video | Default video |
-| `ironlabs-2.0-fast` | `fal-ai/minimax/video-01-lite` | Video | Fast video |
-| `nano-banana-2` | `fal-ai/flux/dev` | Image | Default image |
-| `nano-banana-pro` | `fal-ai/flux-pro/v1.1` | Image | High fidelity |
-| `midjourney-v7` | `fal-ai/ideogram/v2` | Image | Artistic |
-| `gpt-image-2` | `fal-ai/gpt-image-1` | Image | GPT-based |
-| *(any `fal-ai/...` path)* | — | — | Pass FAL model directly |
+| Model alias | OpenRouter model | Type | Notes |
+|-------------|-------------------|------|-------|
+| `ironlabs-2.0` | `x-ai/grok-imagine-video` | Video | Default video |
+| `ironlabs-2.0-fast` | `kwaivgi/kling-v3.0-pro` | Video | Fast video |
+| `youmeng-2.0` / `seedance-2.0` / `sd-2.0` | `bytedance/seedance-2.0` | Video | Alt video model |
+| `nano-banana-2` | `google/gemini-3.1-flash-image-preview` | Image | Default image |
+| `nano-banana-pro` | `google/gemini-3.1-flash-image-preview` | Image | High fidelity |
+| `midjourney-v7` | `google/gemini-3.1-flash-image-preview` | Image | Artistic |
+| `gpt-image-2` | `google/gemini-3.1-flash-image-preview` | Image | GPT-based |
+| *(any `provider/model` path)* | — | — | Pass an OpenRouter model path directly |
 
 ---
 
@@ -80,10 +82,10 @@ node ${CLAUDE_SKILL_DIR}/ironlabs-cli.mjs task generate \
 | Parameter | Description | Default |
 |-----------|-------------|---------|
 | `--prompt` | **(required)** English narrative prompt | — |
-| `--duration` | Video duration 5–10s | `5` |
+| `--duration` | Video duration 5–15s | `5` |
 | `--ratio` | Aspect ratio: 16:9, 9:16, 1:1, 4:3, 3:4 | `1:1` |
 | `--materials` | Comma-separated `<mat-id:role>` pairs | — |
-| `--model` | Model alias or FAL path | `ironlabs-2.0` |
+| `--model` | Model alias or OpenRouter path | `ironlabs-2.0` |
 | `--tags` | Project tags | — |
 
 ### Image Generation
@@ -126,7 +128,7 @@ node ${CLAUDE_SKILL_DIR}/ironlabs-cli.mjs task generate \
 
 ## Material Pool (Batch Ingest)
 
-Scan a folder, analyze with Gemini (via OpenRouter connector), output `material-pool.json`:
+Scan a folder, analyze with Gemini (native via Irona's LLM gateway — no OpenRouter connector), output `material-pool.json`:
 
 ```bash
 node ${CLAUDE_SKILL_DIR}/scripts/material-ingest.mjs ./materials/
@@ -158,7 +160,7 @@ node ${CLAUDE_SKILL_DIR}/scripts/match-materials.mjs \
 | Error | Cause | Fix |
 |-------|-------|-----|
 | 401 Unauthorized | Invalid `IRONLABS_API_KEY` | Check env var, run `/ironlabs:setup` |
-| FAL connector error | FAL AI not connected | Connect at **Settings → Connectors → Fal AI** |
+| OpenRouter connector error | OpenRouter not connected | Connect at **Settings → Connectors → OpenRouter** |
 | Material not found | Invalid material ID | Run `ironlabs material upload <file>` first |
 | Timeout | Large video generation | Response may take 2-5 min; retry if needed |
 

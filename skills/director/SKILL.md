@@ -12,7 +12,7 @@ description: >
 allowed-tools: Bash, Read
 metadata:
   author: ironlabs
-  version: 0.3.0
+  version: 0.1.0
   category: video-production
   tags: [director, creative, video, product, ecommerce, short-film, narrative, story]
 ---
@@ -28,12 +28,12 @@ You are a creative director for AI video production. Default language: English. 
 
 ## Hard Rules
 
-- Platform URL: **https://chat.irona.ai**
-- Default video segment: `--duration 10`. Use other durations (5–10s) when justified (e.g. music beat alignment, pacing needs).
+- Platform URL: **https://www.chat.ironlabs.ai/**
+- Default video segment: `--duration 15` (the model's fixed unit). Use shorter durations (5–15s) when justified (e.g. music beat alignment, pacing needs).
 - Prompts must be in English. Dialogue language matches the user's language.
 - One mood per segment — no contradictory tone/color in the same prompt
 - Characters in 2+ segments: copy the full character description verbatim in every prompt. No abbreviation.
-- Human faces as `ref_image` may trigger privacy detection in some FAL models. If blocked, describe the character in text only and use a generated portrait (no real faces) as reference.
+- Human faces as `ref_image` may trigger privacy detection in some OpenRouter video/image models. If blocked, describe the character in text only and use a generated portrait (no real faces) as reference.
 - Serial continuity is **scene-dependent**: use tail-frame → next `first_frame` when you need an exact opening composition/state; use `ref_video` when you need motion/style carryover from the previous clip.
 - Read video model capabilities before every prompt session: `Read ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/references/video-capabilities.md`
 
@@ -98,7 +98,7 @@ User brief → [Clarify if needed] → Write prompt → Confirm → Generate
 Product image → Gemini analysis → Upload material → Write prompt → Generate
 ```
 
-1. **Analyze product** with Gemini (OpenRouter connector):
+1. **Analyze product** with Gemini (native via Irona gateway — no OpenRouter connector):
 ```bash
 node ${CLAUDE_PLUGIN_ROOT}/skills/gemini-gen/scripts/gemini.mjs \
   --file <product-image> --mode product
@@ -209,7 +209,7 @@ node ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/ironlabs-cli.mjs task generate \
   --materials "101:ref_image" --duration 10 --ratio 16:9
 ```
 
-> **Note on faces**: FAL models may apply privacy detection to uploaded face photos. If a real person photo is blocked, generate an AI portrait of the character instead and upload that as the reference.
+> **Note on faces**: OpenRouter video/image models may apply privacy detection to uploaded face photos. If a real person photo is blocked, generate an AI portrait of the character instead and upload that as the reference.
 
 ---
 
@@ -282,9 +282,9 @@ node ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/ironlabs-cli.mjs credit me
 | Problem | Fix |
 |---------|-----|
 | Privacy/face detection blocked | Use AI-generated character portrait instead of real photo. Or describe character in text only. |
-| 402 insufficient credits | `credit me`, inform user, suggest top-up at https://chat.irona.ai |
+| 402 insufficient credits | `credit me`, inform user, suggest top-up at https://www.chat.ironlabs.ai/ |
 | Character drifts between segments | Upload character sheet material, add `MAT_ID:ref_image` to every segment. Copy full text description verbatim. |
 | Video ignores actions in prompt | Prompt too dense — reduce to 3-4 actions per 5s window |
 | Video looks incoherent | Simplify: 2 camera stages, one mood, fewer actions |
 | Segments don't connect | Re-check the continuity choice: use tail-frame → next `first_frame` for exact opening-state matches, or `ref_video` for motion carryover; add cross-dissolve in post if needed |
-| FAL connector error | Connect Fal AI at **Settings → Connectors → Fal AI** in IronLabs |
+| OpenRouter connector error | Connect OpenRouter at **Settings → Connectors → OpenRouter** in IronLabs |

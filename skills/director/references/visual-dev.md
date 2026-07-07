@@ -16,11 +16,11 @@ Quick reference for creating and registering visual assets before writing prompt
 
 | Use case | Model | Why |
 |----------|-------|-----|
-| Character design sheet, scene refs, drafts | `fal-ai/flux/dev` | Balanced quality, fast iteration (default) |
-| Hero keyframe where fidelity matters | `fal-ai/flux-pro` | Highest fidelity + lighting quality |
-| Stylized / painterly illustration | `fal-ai/flux/dev` with style keywords | Add "painterly", "illustration style" to prompt |
+| Character design sheet, scene refs, drafts | `nano-banana-2` | Balanced quality, fast iteration (default) |
+| Hero keyframe where fidelity matters | `nano-banana-pro` | Highest fidelity variant |
+| Stylized / painterly illustration | `nano-banana-2` with style keywords | Add "painterly", "illustration style" to prompt |
 
-Override with `IRONLABS_IMAGE_MODEL` env var, or pass `--model` to `video-gen.sh --image`.
+Pass `--model` to `ironlabs-cli.mjs task generate`.
 
 ---
 
@@ -45,8 +45,8 @@ No text labels. No background elements.
 
 **Generate:**
 ```bash
-bash ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/scripts/video-gen.sh \
-  --image --ratio 16:9 \
+node ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/ironlabs-cli.mjs task generate \
+  --model nano-banana-2 --ratio 16:9 \
   --prompt "<character sheet prompt>" \
   --tags "<project>,char-<name>"
 # → saved locally, copy to assets/char-<name>.jpg
@@ -74,8 +74,8 @@ Scene images must NOT contain human faces.
 
 **Generate one scene ref per segment:**
 ```bash
-bash ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/scripts/video-gen.sh \
-  --image --ratio 16:9 \
+node ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/ironlabs-cli.mjs task generate \
+  --model nano-banana-2 --ratio 16:9 \
   --prompt "<scene description, environment only, no people. Include: location, time of day, lighting, color palette, key props, atmosphere. Photorealistic, cinematic composition.>" \
   --tags "<project>,scene-s<N>"
 # → copy output to assets/scene-s<N>.jpg
@@ -105,19 +105,20 @@ Character refs, `ref_video`, `first_frame`, and scene refs combine freely via `-
 ```
 
 **Example workflow for a 3-segment project:**
+(Upload each new file with `material upload` to get its ID before referencing it in `--materials` — see [Combining Anchors](#combining-anchors) above.)
 ```
 Prep:
   1. Generate character sheet → save to assets/char.jpg
   2. Generate scene concepts in parallel → save to assets/scene-s1.jpg, assets/scene-s2.jpg
 
 Generate (serial chain):
-  S1: video-gen.sh --materials "assets/char.jpg:ref_image,assets/scene-s1.jpg:ref_image"
+  S1: task generate --materials "char:ref_image,scene-s1:ref_image"
   → ffmpeg extract tail frame → generated/keyframes/S1-end.jpg
 
-  S2: video-gen.sh --materials "assets/char.jpg:ref_image,generated/keyframes/S1-end.jpg:first_frame,generated/shots/S1.mp4:ref_video,assets/scene-s2.jpg:ref_image"
+  S2: task generate --materials "char:ref_image,S1-end:first_frame,S1-video:ref_video,scene-s2:ref_image"
   → ffmpeg extract tail frame → generated/keyframes/S2-end.jpg
 
-  S3: video-gen.sh --materials "assets/char.jpg:ref_image,generated/keyframes/S2-end.jpg:first_frame,generated/shots/S2.mp4:ref_video,assets/scene-s2.jpg:ref_image"
+  S3: task generate --materials "char:ref_image,S2-end:first_frame,S2-video:ref_video,scene-s2:ref_image"
 ```
 
 S1 has no `ref_video` or `first_frame` — nothing to continue from. Add those anchors only from S2 onward.

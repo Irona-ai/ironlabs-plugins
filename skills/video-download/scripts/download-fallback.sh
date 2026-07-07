@@ -13,8 +13,14 @@ OUTPUT_DIR="${2:-resources/references}"
 
 mkdir -p "$OUTPUT_DIR"
 
-# Generate filename from URL
-FILENAME="fallback-$(echo "$URL" | md5 -q 2>/dev/null || echo "$URL" | md5sum | cut -d' ' -f1 | head -c 12).mp4"
+# Generate filename from URL. Truncate to 12 chars on both platforms so the
+# same URL dedups to the same filename regardless of which md5 tool ran.
+if command -v md5 >/dev/null 2>&1; then
+  URL_HASH=$(echo "$URL" | md5 -q | head -c 12)
+else
+  URL_HASH=$(echo "$URL" | md5sum | cut -d' ' -f1 | head -c 12)
+fi
+FILENAME="fallback-${URL_HASH}.mp4"
 OUTPUT_PATH="$OUTPUT_DIR/$FILENAME"
 
 if [ -f "$OUTPUT_PATH" ] && [ -s "$OUTPUT_PATH" ]; then
@@ -28,7 +34,13 @@ agent-browser open "https://greenvideo.cc/en/" 2>/dev/null
 sleep 3
 
 echo "Pasting URL and parsing..."
-# Get snapshot to find input field
+# Get snapshot to find input field.
+# NOTE: this grabs the first @ref in the snapshot as a heuristic for "the input
+# field" — it isn't scoped to input elements specifically, so a page layout
+# change on GreenVideo's end (e.g. a banner or button appearing before the
+# input) can silently make this target the wrong element. Same caveat applies
+# to the button lookup below. A more robust fix would target by element role/
+# accessible-name if agent-browser's snapshot format exposes one.
 SNAPSHOT=$(agent-browser snapshot 2>/dev/null)
 INPUT_REF=$(echo "$SNAPSHOT" | grep -oP '@\w+' | head -1)
 

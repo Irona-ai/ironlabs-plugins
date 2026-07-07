@@ -6,14 +6,14 @@ Model reference only. For prompt writing guidance, see `Read ${CLAUDE_SKILL_DIR}
 
 | Parameter | Value |
 |-----------|-------|
-| Default model | `fal-ai/minimax/video-01` |
+| Default model | `x-ai/grok-imagine-video` (alias `ironlabs-2.0`) |
 | Min duration | 5 seconds |
 | Max duration | 15 seconds |
 | Duration options | Any integer 5–15s |
 | Resolution | Up to 1080p |
 | Aspect ratios | `16:9`, `9:16`, `1:1`, `4:3`, `3:4` |
 
-Override with `IRONLABS_VIDEO_MODEL` env var or `--model` flag.
+Override with the `--model` flag.
 
 ---
 
@@ -146,18 +146,22 @@ For sequential segments, choose method based on scene goal:
 - You need a clean visual handoff of gaze, props, or lighting
 
 ```bash
+CLI=${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/ironlabs-cli.mjs
+
 # Generate S1
-bash ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/scripts/video-gen.sh \
+node "$CLI" task generate \
   --prompt "<S1 prompt>" --duration 15 --ratio 16:9
+# → rename output to generated/shots/S1.mp4
 
 # Extract tail frame
 ffmpeg -sseof -0.2 -i generated/shots/S1.mp4 -frames:v 1 -q:v 2 -y generated/keyframes/S1-end.jpg
 
 # S2 opens exactly where S1 ended
-bash ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/scripts/video-gen.sh \
+S1_END=$(node "$CLI" material upload generated/keyframes/S1-end.jpg | jq -r '.material.id')
+node "$CLI" task generate \
   --prompt "Continuing from the previous shot: <S2 prompt>" \
   --duration 15 --ratio 16:9 \
-  --materials "generated/keyframes/S1-end.jpg:first_frame"
+  --materials "${S1_END}:first_frame"
 ```
 
 **Use `ref_video` when:**
@@ -165,10 +169,12 @@ bash ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/scripts/video-gen.sh \
 - The transition is dynamic and a single extracted still is not enough
 
 ```bash
-bash ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/scripts/video-gen.sh \
+CLI=${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/ironlabs-cli.mjs
+S1_VIDEO=$(node "$CLI" material upload generated/shots/S1.mp4 | jq -r '.material.id')
+node "$CLI" task generate \
   --prompt "Continuing from the previous shot: <S2 prompt>" \
   --duration 15 --ratio 16:9 \
-  --materials "generated/shots/S1.mp4:ref_video"
+  --materials "${S1_VIDEO}:ref_video"
 ```
 
 ---
