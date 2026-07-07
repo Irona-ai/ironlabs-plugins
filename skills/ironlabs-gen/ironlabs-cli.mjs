@@ -172,7 +172,10 @@ var IronlabsClient = class {
   // ---- Credit ----
   async getMe() {
     const data = await this.request("GET", "/chat/balance");
-    const balance = data.data?.totalBalance ?? data.balance ?? 0;
+    const balance = data.data?.totalBalance ?? data.balance;
+    if (typeof balance !== "number") {
+      throw new ApiError(500, data, "Balance response did not include a totalBalance value");
+    }
     return { user: { id: "ironlabs-user", balance }, balance };
   }
   async estimateCost(params = {}) {

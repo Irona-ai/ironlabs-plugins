@@ -4,7 +4,7 @@
  * Gemini analysis via Irona's LLM gateway (direct completions).
  * Zero npm dependencies — uses native fetch.
  * Auth: IRONLABS_API_KEY → POST /api/v1/chat/completions (SSE)
- * Model: gemini-2.5-flash (native in Irona gateway — no OpenRouter connector needed)
+ * Model: gemini-3.5-flash (native in Irona gateway — no OpenRouter connector needed)
  *
  * Usage:
  *   node gemini.mjs "Explain quantum computing"
@@ -19,7 +19,7 @@
  *   --file <path>         Attach a local file (image/video). Repeatable. ≤20MB inline.
  *   --resolution <level>  low|medium|high|ultra_high (hint only, for prompt context)
  *   --mode <name>         Preset: product, video-script, style
- *   --model <name>        Irona model name (default: gemini-2.5-flash)
+ *   --model <name>        Irona model name (default: gemini-3.5-flash)
  *   --temperature <n>     Temperature (default: 1.0)
  *   --max-tokens <n>      Max output tokens (default: 8192)
  *   --json                Request JSON-only response
@@ -98,7 +98,7 @@ function parseArgs(argv) {
   const dataUris = [];
   let resolution = "medium";
   let mode = null;
-  let model = "gemini-2.5-flash";
+  let model = "gemini-3.5-flash";
   let temperature = 1.0;
   let maxTokens = 8192;
   let jsonMode = false;
@@ -276,7 +276,7 @@ Options:
   --data-uri <uri>      Inline base64 data URI (repeatable, e.g. "data:image/jpeg;base64,...")
   --resolution <level>  low / medium / high / ultra_high (hint only)
   --mode <name>         Preset: product, video-script, style
-  --model <name>        Irona model (default: gemini-2.5-flash)
+  --model <name>        Irona model (default: gemini-3.5-flash)
   --temperature <n>     Temperature (default: 1.0)
   --max-tokens <n>      Max output tokens (default: 8192)
   --json                Request JSON-only response

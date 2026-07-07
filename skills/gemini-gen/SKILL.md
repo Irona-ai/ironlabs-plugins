@@ -2,7 +2,7 @@
 name: gemini-gen
 description: >
   Visual understanding and multimodal analysis via Irona's LLM gateway
-  (gemini-2.5-flash — no OpenRouter connector required). Handles product analysis,
+  (gemini-3.5-flash — no OpenRouter connector required). Handles product analysis,
   video script extraction, and style analysis from images and videos.
   Backend: POST /api/v1/chat/completions (SSE).
   Do NOT use for generating images or videos — use ironlabs-gen for that.
@@ -119,7 +119,7 @@ node ${CLAUDE_SKILL_DIR}/scripts/gemini.mjs --json "Return a JSON object with na
 | `--file <path>`        | —                          | Attach local file (repeatable, ≤20MB inline)    |
 | `--data-uri <uri>`     | —                          | Inline base64 data URI (repeatable, for pasted images) |
 | `--resolution <level>` | `medium`                   | Hint only: `low` / `medium` / `high` / `ultra_high` |
-| `--model <name>`       | `gemini-2.5-flash`         | Irona model name                                |
+| `--model <name>`       | `gemini-3.5-flash`         | Irona model name                                |
 | `--temperature <n>`    | `1.0`                      | Temperature                                     |
 | `--max-tokens <n>`     | `8192`                     | Max output tokens                               |
 | `--json`               | off                        | Append JSON-only instruction to prompt          |
