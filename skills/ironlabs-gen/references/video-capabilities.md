@@ -67,7 +67,7 @@ Default to **Text-to-Video**. Only use reference materials for:
 
 ## Duration Strategy
 
-`--duration` accepts any integer 5–15s, but the recommended default segment length is 15s — treat it as the standard working unit unless a shorter duration is justified (e.g. music beat alignment, pacing needs).
+`--duration` accepts any integer 5–15s. **Always pass it explicitly** — the CLI does not default to 15s. If omitted, the flag is never sent to OpenRouter and the API applies its own default (effectively 5s). The recommended segment length is 15s; treat it as the standard working unit and pass `--duration 15` unless a shorter duration is justified (e.g. music beat alignment, pacing needs).
 
 | | Single 15s | Stitched segments |
 |---|---------|----------|
