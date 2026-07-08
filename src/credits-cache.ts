@@ -56,7 +56,7 @@ export async function refreshFromApi(): Promise<void> {
   const apiKey = process.env.IRONLABS_API_KEY
   if (!apiKey) return
 
-  const baseUrl = process.env.IRONLABS_BASE_URL ?? 'https://chat.irona.ai/api/v1'
+  const baseUrl = process.env.IRONLABS_BASE_URL ?? 'https://www.chat.ironlabs.ai/api/v1'
 
   const res = await fetch(`${baseUrl}/chat/balance`, {
     headers: { Authorization: `Bearer ${apiKey}` },
