@@ -92,7 +92,7 @@ Return ONLY valid JSON (no markdown fences) with these fields:
 - description: one sentence describing the content
 - has_face: boolean — true if a realistic human face is clearly visible
 - colors: array of dominant color names
-- suitable_roles: array from ["ref_image", "image1", "image2", "ref_video", "first_frame", "last_frame"]`;
+- suitable_roles: array from ["ref_image", "first_frame", "last_frame"] — for video files, leave empty (a raw video isn't a usable generation role; extract a still frame first)`;
 
   try {
     const output = execFileSync(
@@ -160,7 +160,7 @@ Options:
         description: "",
         has_face: false,
         colors: [],
-        suitable_roles: r.type === "video" ? ["ref_video"] : ["ref_image", "image1"],
+        suitable_roles: r.type === "video" ? [] : ["ref_image"],
       });
     }
   } else {
@@ -192,7 +192,7 @@ Options:
           description: "",
           has_face: false,
           colors: [],
-          suitable_roles: r.type === "video" ? ["ref_video"] : ["ref_image", "image1"],
+          suitable_roles: r.type === "video" ? [] : ["ref_image"],
         });
       }
     }

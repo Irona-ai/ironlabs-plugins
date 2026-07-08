@@ -56,22 +56,18 @@ Override with the `--model` flag.
 - **⚠️ Privacy detection**: Images with realistic human faces may be blocked
 - Suitable for: product photos (no faces), landscapes, illustrations, scene refs
 
-### Video-to-Video
-- Material role: `ref_video`
-- Suitable for: motion transfer, style carryover from previous segment
-
 ### Best Practices
 Default to **Text-to-Video**. Only use reference materials for:
 - Pure product photos (no faces) → `ref_image`
 - Abstract/landscape references → `ref_image`
-- Precise motion replication (no faces) → `ref_video`
+- Exact carried-over opening state from a previous segment → `first_frame`
 - **Human faces** → describe in text only. Do NOT pass face photos as `ref_image`.
 
 ---
 
 ## Duration Strategy
 
-All video generations use `--duration 15`. This is the fixed unit.
+`--duration` accepts any integer 5–15s, but the recommended default segment length is 15s — treat it as the standard working unit unless a shorter duration is justified (e.g. music beat alignment, pacing needs).
 
 | | Single 15s | Stitched segments |
 |---|---------|----------|
@@ -130,7 +126,6 @@ BAD:  Warm amber tones shifting to cold blue-grey, cinematic, tense atmosphere.
 |--------|----------|---------------|
 | `path:ref_image` (scene ref, no faces) | Medium | Environment, lighting, color palette |
 | `path:first_frame` (extracted tail frame) | Strong | Exact opening composition of next segment |
-| `path:ref_video` (previous segment) | Strong | Motion continuity from previous segment |
 | Text-only description | Weak | Nothing locked visually — model may drift |
 
 More anchors = stronger consistency, but longer generation time (8–12 min with multiple anchors vs 5–8 min text-only). Use only what each segment actually needs.
@@ -139,11 +134,7 @@ More anchors = stronger consistency, but longer generation time (8–12 min with
 
 ## Multi-Segment Continuity
 
-For sequential segments, choose method based on scene goal:
-
-**Use tail-frame → next `first_frame` when:**
-- The next segment must open on an exact carried-over pose/composition/state
-- You need a clean visual handoff of gaze, props, or lighting
+For sequential segments, use tail-frame → next `first_frame` when the next segment must open on an exact carried-over pose/composition/state, or when you need a clean visual handoff of gaze, props, or lighting. This is the only supported continuity method — the CLI does not forward a previous-segment video as generation input.
 
 ```bash
 CLI=${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/ironlabs-cli.mjs
@@ -162,19 +153,6 @@ node "$CLI" task generate \
   --prompt "Continuing from the previous shot: <S2 prompt>" \
   --duration 15 --ratio 16:9 \
   --materials "${S1_END}:first_frame"
-```
-
-**Use `ref_video` when:**
-- Motion/style carryover matters more than pinning the exact opening frame
-- The transition is dynamic and a single extracted still is not enough
-
-```bash
-CLI=${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/ironlabs-cli.mjs
-S1_VIDEO=$(node "$CLI" material upload generated/shots/S1.mp4 | jq -r '.material.id')
-node "$CLI" task generate \
-  --prompt "Continuing from the previous shot: <S2 prompt>" \
-  --duration 15 --ratio 16:9 \
-  --materials "${S1_VIDEO}:ref_video"
 ```
 
 ---

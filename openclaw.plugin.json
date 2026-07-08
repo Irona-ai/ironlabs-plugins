@@ -2,7 +2,7 @@
   "id": "ironlabs",
   "name": "IronLabs",
   "description": "AI video production skills — creative direction, video/image generation (OpenRouter), multimodal analysis (Gemini, native via Irona gateway), and video download.",
-  "version": "0.1.0",
+  "version": "0.2.1",
   "skills": [
     "skills/director",
     "skills/gemini-gen",

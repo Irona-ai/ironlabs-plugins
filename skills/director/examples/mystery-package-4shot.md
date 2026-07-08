@@ -98,7 +98,7 @@ MAYA=$(node "$CLI" material upload assets/maya-ref.jpg | jq -r '.material.id')
 HALLWAY=$(node "$CLI" material upload assets/scene-hallway.jpg | jq -r '.material.id')
 LIVING=$(node "$CLI" material upload assets/scene-living.jpg | jq -r '.material.id')
 
-# S1 — character ref + scene ref (no ref_video for first segment)
+# S1 — character ref + scene ref (no first_frame for first segment)
 node "$CLI" task generate \
   --prompt "<S1 prompt>" --duration 8 --ratio 16:9 \
   --materials "${MAYA}:ref_image,${HALLWAY}:ref_image" \
@@ -110,10 +110,9 @@ ffmpeg -sseof -0.2 -i generated/shots/S1.mp4 -frames:v 1 -q:v 2 -y generated/key
 
 # S2
 S1_END=$(node "$CLI" material upload generated/keyframes/S1-end.jpg | jq -r '.material.id')
-S1_VIDEO=$(node "$CLI" material upload generated/shots/S1.mp4 | jq -r '.material.id')
 node "$CLI" task generate \
   --prompt "<S2 prompt>" --duration 13 --ratio 16:9 \
-  --materials "${MAYA}:ref_image,${S1_END}:first_frame,${S1_VIDEO}:ref_video,${LIVING}:ref_image" \
+  --materials "${MAYA}:ref_image,${S1_END}:first_frame,${LIVING}:ref_image" \
   --tags "mystery,s2"
 # → rename output to generated/shots/S2.mp4
 
@@ -121,10 +120,9 @@ ffmpeg -sseof -0.2 -i generated/shots/S2.mp4 -frames:v 1 -q:v 2 -y generated/key
 
 # S3
 S2_END=$(node "$CLI" material upload generated/keyframes/S2-end.jpg | jq -r '.material.id')
-S2_VIDEO=$(node "$CLI" material upload generated/shots/S2.mp4 | jq -r '.material.id')
 node "$CLI" task generate \
   --prompt "<S3 prompt>" --duration 12 --ratio 16:9 \
-  --materials "${MAYA}:ref_image,${S2_END}:first_frame,${S2_VIDEO}:ref_video,${LIVING}:ref_image" \
+  --materials "${MAYA}:ref_image,${S2_END}:first_frame,${LIVING}:ref_image" \
   --tags "mystery,s3"
 # → rename output to generated/shots/S3.mp4
 
@@ -132,10 +130,9 @@ ffmpeg -sseof -0.2 -i generated/shots/S3.mp4 -frames:v 1 -q:v 2 -y generated/key
 
 # S4
 S3_END=$(node "$CLI" material upload generated/keyframes/S3-end.jpg | jq -r '.material.id')
-S3_VIDEO=$(node "$CLI" material upload generated/shots/S3.mp4 | jq -r '.material.id')
 node "$CLI" task generate \
   --prompt "<S4 prompt>" --duration 12 --ratio 16:9 \
-  --materials "${MAYA}:ref_image,${S3_END}:first_frame,${S3_VIDEO}:ref_video,${LIVING}:ref_image" \
+  --materials "${MAYA}:ref_image,${S3_END}:first_frame,${LIVING}:ref_image" \
   --tags "mystery,s4"
 # → rename output to generated/shots/S4.mp4
 ```

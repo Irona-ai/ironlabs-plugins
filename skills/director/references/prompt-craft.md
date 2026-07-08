@@ -149,21 +149,13 @@ Dimly lit apartment hallway, warm pendant light overhead...
 | **Match Cut** | Similar shape/color/motion links two different shots | Thematic connections |
 | **Emotional Shift** | Abrupt mood change (quiet→loud or loud→quiet) | Surprises, twists |
 
-### Serial continuity: choose based on scene goal
+### Serial continuity
 
-**Use tail-frame → next `first_frame` when:**
-- The next shot must open on an exact composition from the previous shot
+Use tail-frame → next `first_frame` when the next shot must open on an exact composition from the previous shot. This is the only supported continuity method — the CLI does not forward a previous shot's video as generation input.
 
 ```bash
 ffmpeg -sseof -0.2 -i generated/shots/S1.mp4 -frames:v 1 -q:v 2 -y generated/keyframes/S1-end.jpg
 # then pass: --materials "generated/keyframes/S1-end.jpg:first_frame"
-```
-
-**Use `ref_video` when:**
-- Motion/style transfer matters more than pinning the next shot's exact opening frame
-
-```bash
-# pass: --materials "generated/shots/S1.mp4:ref_video"
 ```
 
 ### Same style line everywhere

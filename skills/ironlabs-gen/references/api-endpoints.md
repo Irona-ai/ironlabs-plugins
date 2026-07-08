@@ -175,7 +175,7 @@ Response: `{ data_base64: "<base64 video bytes>" }`.
 | `ironlabs-2.0-fast` | `kwaivgi/kling-v3.0-pro` | Video fast |
 | `youmeng-2.0` / `seedance-2.0` / `sd-2.0` | `bytedance/seedance-2.0` | Video alt |
 | `nano-banana-2` | `google/gemini-3.1-flash-image-preview` | Image (default) |
-| `nano-banana-pro` | `google/gemini-3.1-flash-image-preview` | Image high fidelity |
+| `nano-banana-pro` | `google/gemini-3.1-flash-image-preview` | Image (currently same model as `nano-banana-2`) |
 | `midjourney-v7` | `google/gemini-3.1-flash-image-preview` | Image artistic |
 | `gpt-image-2` | `google/gemini-3.1-flash-image-preview` | Image GPT-based |
 

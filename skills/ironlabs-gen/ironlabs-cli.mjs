@@ -37,10 +37,14 @@ const MATERIAL_DIR = join(IRONLABS_DIR, "materials");
 
 // Monotonic ID generator: Date.now() alone collides when multiple
 // tasks/materials are created within the same millisecond (e.g. Promise.all
-// batches), silently overwriting each other's stored files.
+// batches), silently overwriting each other's stored files. process.pid is
+// folded into the starting offset so separate CLI processes launched in the
+// same millisecond don't both start counting from 0. Stays within Date.now()
+// * 1000's headroom under Number.MAX_SAFE_INTEGER.
+const pidSalt = process.pid % 1000;
 let idSequence = 0;
 function nextId() {
-  return Date.now() * 1000 + (idSequence++ % 1000);
+  return Date.now() * 1000 + ((pidSalt + idSequence++) % 1000);
 }
 
 function writeTask(id, data) {
@@ -93,7 +97,9 @@ function listLocalMaterials(params = {}) {
       })
       .filter(Boolean);
     materials.sort((a, b) => b.id - a.id); // most recent first (id is a monotonic timestamp)
-    return materials.slice(0, params.limit || 50);
+    const offset = params.offset || 0;
+    const limit = params.limit || 50;
+    return materials.slice(offset, offset + limit);
   } catch { return []; }
 }
 
@@ -190,7 +196,7 @@ var IronlabsClient = class {
     const data = await this.request("GET", "/chat/balance");
     const raw = data.data?.totalBalance ?? data.balance ?? 0;
     const dollars = typeof raw === "string" ? parseFloat(raw) : raw;
-    const balance = Math.round(dollars * 100); // totalBalance is in dollars — normalize to cents
+    const balance = typeof dollars === "number" && !isNaN(dollars) ? Math.round(dollars * 100) : 0; // totalBalance is in dollars — normalize to cents
     return { user: { id: "ironlabs-user", balance }, balance };
   }
   async estimateCost(params = {}) {
@@ -263,6 +269,7 @@ var IronlabsClient = class {
         const imgPart = choice.content.find(p => p.type === "image_url");
         imageUrl = imgPart?.image_url?.url ?? null;
       }
+      if (!imageUrl) throw new ApiError(500, orResult, "OpenRouter connector did not return an image");
       const stored = {
         taskId, status: "completed",
         model, prompt: params.prompt,
@@ -574,7 +581,7 @@ Commands:
   result <id>                 Get task result
   wait <id>                   Wait for task (already done — returns cached result)
   cancel <id>                 Cancel a task (no-op for synchronous tasks)
-  chain <id>                  Download completed task result → upload as material (for ref_video chaining)
+  chain <id>                  Download completed task result → upload as material (e.g. for first_frame chaining)
   tags                        List all your tags
   tag <id> --tags a,b,c       Update tags on a task
 
@@ -613,6 +620,7 @@ Commands:
 Options for list:
   --type <image|video>        Filter by type
   --limit <n>                 Max results (default: 20)
+  --offset <n>                Skip first n results (default: 0)
 
 Options for upload:
   --type <image|video>        Override auto-detected type
@@ -759,7 +767,7 @@ async function taskCancel(client, positional) {
 async function taskChain(client, positional) {
   const id = parseInt(positional[0]);
   if (!id) {
-    console.error("Error: task ID required.\nUsage: ironlabs task chain <id>\n\nDownloads completed task result and uploads as material for ref_video chaining.");
+    console.error("Error: task ID required.\nUsage: ironlabs task chain <id>\n\nDownloads a completed task result and re-uploads it as a material (e.g. for extracting a tail frame to use as first_frame in the next segment).");
     process.exit(1);
   }
   console.log(`Getting result for task #${id}...`);
@@ -793,7 +801,11 @@ async function taskChain(client, positional) {
   const data = await client.uploadMaterial(buffer, filename, type);
   const matId = data.material?.id || data.id;
   console.log(`\nMaterial #${matId} ready.`);
-  console.log(`Use as: --materials "${matId}:ref_${type}"`);
+  if (isVideo) {
+    console.log(`Note: video isn't a supported --materials role. Extract a tail frame with ffmpeg and upload that instead for first_frame continuity.`);
+  } else {
+    console.log(`Use as: --materials "${matId}:ref_image"`);
+  }
   json(data);
 }
 async function taskTags(client) {
@@ -812,6 +824,7 @@ async function materialList(client, flags) {
   const data = await client.listMaterials({
     type: flags.type,
     limit: flags.limit ? parseInt(flags.limit) : 20,
+    offset: flags.offset ? parseInt(flags.offset) : 0,
   });
   console.log(`Found ${data.materials.length} material(s):\n`);
   for (const m of data.materials) {
@@ -924,9 +937,6 @@ async function assetDelete(client, positional) {
 async function creditMe(client) {
   json(await client.getMe());
 }
-async function creditEstimate(client, flags) {
-  json(await client.estimateCost({ model: flags.model, duration: flags.duration }));
-}
 function buildCreateParams(flags) {
   const params = { prompt: flags.prompt };
   if (flags.model) params.model = flags.model;
@@ -944,7 +954,7 @@ function buildCreateParams(flags) {
         allMaterials.push({ user_asset_id: assetId, role });
       } else {
         const [id, role] = parts;
-        allMaterials.push({ id: parseInt(id), role: role || "ref_video" });
+        allMaterials.push({ id: parseInt(id), role: role || "ref_image" });
       }
     }
   }
@@ -1061,8 +1071,8 @@ async function main() {
         break;
       case "credit":
         switch (action) {
-          case "me":       await creditMe(client); break;
-          case "estimate": await creditEstimate(client, flags); break;
+          case "me": await creditMe(client); break;
+          // "estimate" is handled earlier (before client/auth setup) since it's pure local math.
           default:
             console.error(`Unknown credit action: ${action}\n`);
             console.log(HELP_CREDIT);

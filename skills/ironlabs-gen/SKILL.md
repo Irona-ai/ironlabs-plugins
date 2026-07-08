@@ -35,16 +35,16 @@ Gemini analysis (material-ingest) shells out to `gemini-gen`'s script, which run
 ## Quick Start
 
 ```bash
-# Text-to-Video — 10s
+# Text-to-Video — 15s (recommended default segment length)
 node ${CLAUDE_SKILL_DIR}/ironlabs-cli.mjs task generate \
-  --prompt "[0-5s] Close-up of a cat on the moon, slow push in. [5-10s] The cat dances under twinkling stars." \
-  --duration 10 --ratio 16:9
+  --prompt "[0-5s] Close-up of a cat on the moon, slow push in. [5-15s] The cat dances under twinkling stars." \
+  --duration 15 --ratio 16:9
 
 # Image-to-Video — upload a reference image, then generate
 MAT=$(node ${CLAUDE_SKILL_DIR}/ironlabs-cli.mjs material upload /path/to/photo.jpg | jq -r '.material.id')
 node ${CLAUDE_SKILL_DIR}/ironlabs-cli.mjs task generate \
   --prompt "The product rotates slowly on a white pedestal, soft studio lighting, cinematic." \
-  --materials "${MAT}:ref_image" --duration 10 --ratio 16:9
+  --materials "${MAT}:ref_image" --duration 15 --ratio 16:9
 
 # Generate Image
 node ${CLAUDE_SKILL_DIR}/ironlabs-cli.mjs task generate \
@@ -60,7 +60,7 @@ node ${CLAUDE_SKILL_DIR}/ironlabs-cli.mjs task generate \
 | `ironlabs-2.0-fast` | `kwaivgi/kling-v3.0-pro` | Video | Fast video |
 | `youmeng-2.0` / `seedance-2.0` / `sd-2.0` | `bytedance/seedance-2.0` | Video | Alt video model |
 | `nano-banana-2` | `google/gemini-3.1-flash-image-preview` | Image | Default image |
-| `nano-banana-pro` | `google/gemini-3.1-flash-image-preview` | Image | High fidelity |
+| `nano-banana-pro` | `google/gemini-3.1-flash-image-preview` | Image | Currently maps to the same model as `nano-banana-2` |
 | `midjourney-v7` | `google/gemini-3.1-flash-image-preview` | Image | Artistic |
 | `gpt-image-2` | `google/gemini-3.1-flash-image-preview` | Image | GPT-based |
 | *(any `provider/model` path)* | — | — | Pass an OpenRouter model path directly |
@@ -73,7 +73,7 @@ node ${CLAUDE_SKILL_DIR}/ironlabs-cli.mjs task generate \
 
 ```bash
 node ${CLAUDE_SKILL_DIR}/ironlabs-cli.mjs task generate \
-  --prompt "..." --duration 10 --ratio 16:9 \
+  --prompt "..." --duration 15 --ratio 16:9 \
   [--materials "<mat-id:role,...>"] [--model <model>] [--tags "project-x"]
 ```
 
@@ -82,7 +82,7 @@ node ${CLAUDE_SKILL_DIR}/ironlabs-cli.mjs task generate \
 | Parameter | Description | Default |
 |-----------|-------------|---------|
 | `--prompt` | **(required)** English narrative prompt | — |
-| `--duration` | Video duration 5–15s | `5` |
+| `--duration` | Video duration 5–15s. Omit and the API applies its own default (5s) — always pass explicitly; the recommended segment length is 15s | `5` (API default if omitted) |
 | `--ratio` | Aspect ratio: 16:9, 9:16, 1:1, 4:3, 3:4 | `1:1` |
 | `--materials` | Comma-separated `<mat-id:role>` pairs | — |
 | `--model` | Model alias or OpenRouter path | `ironlabs-2.0` |
@@ -105,7 +105,6 @@ First upload a file to get a material ID, then reference it by ID.
 |------|---------------------|--------------|
 | Reference image | `<id>:ref_image` | Style/environment guidance |
 | First frame | `<id>:first_frame` | Pin opening composition |
-| Reference video | `<id>:ref_video` | Motion/style carryover |
 
 ```bash
 # Upload material first
@@ -113,14 +112,14 @@ MAT=$(node ${CLAUDE_SKILL_DIR}/ironlabs-cli.mjs material upload scene.jpg | jq -
 
 # With reference image
 node ${CLAUDE_SKILL_DIR}/ironlabs-cli.mjs task generate \
-  --prompt "..." --duration 10 --ratio 16:9 \
+  --prompt "..." --duration 15 --ratio 16:9 \
   --materials "${MAT}:ref_image"
 
 # With multiple references
 MAT1=$(node ${CLAUDE_SKILL_DIR}/ironlabs-cli.mjs material upload char.jpg | jq -r '.material.id')
 MAT2=$(node ${CLAUDE_SKILL_DIR}/ironlabs-cli.mjs material upload scene.jpg | jq -r '.material.id')
 node ${CLAUDE_SKILL_DIR}/ironlabs-cli.mjs task generate \
-  --prompt "..." --duration 10 --ratio 16:9 \
+  --prompt "..." --duration 15 --ratio 16:9 \
   --materials "${MAT1}:ref_image,${MAT2}:ref_image"
 ```
 

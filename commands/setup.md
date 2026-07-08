@@ -42,7 +42,7 @@ If it outputs `SET`, skip to Step 3.
 ## Step 3: Verify the Connection
 
 ```bash
-curl -s "${IRONLABS_BASE_URL:-https://www.chat.ironlabs.ai}/api/v1/chat/model" \
+curl -s "${IRONLABS_BASE_URL:-https://www.chat.ironlabs.ai/api/v1}/chat/model" \
   -H "Authorization: Bearer ${IRONLABS_API_KEY}" | head -c 200
 ```
 
@@ -50,9 +50,9 @@ A successful response is a JSON array. If you get a `401`, the key is invalid �
 
 ## Step 4: Optional — Set a Custom Base URL
 
-Ask the user if they want to connect to a staging or self-hosted instance instead of `https://www.chat.ironlabs.ai/`.
+Ask the user if they want to connect to a staging or self-hosted instance instead of `https://www.chat.ironlabs.ai/api/v1`.
 
-If yes, use AskUserQuestion to collect the base URL, then save it alongside the API key:
+If yes, use AskUserQuestion to collect the base URL. It must include the `/api/v1` path (e.g. `https://staging.ironlabs.ai/api/v1`) — the CLI and statusLine append endpoint paths like `/chat/balance` directly onto it. Then save it alongside the API key:
 
 ```json
 {
