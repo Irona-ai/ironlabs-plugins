@@ -46,4 +46,4 @@ This will guide you through connecting your API key and enabling the real-time b
 | Variable | Required By | Description |
 |----------|------------|-------------|
 | `IRONLABS_API_KEY` | All skills | IronLabs API key. Get one at https://studio.ironlabs.ai → API Keys |
-| `IRONLABS_BASE_URL` | All skills | Optional. Override API base URL (e.g. for staging: `https://stg-chat.irona.ai`) |
+| `IRONLABS_BASE_URL` | All skills | Optional. Override API base URL (e.g. for staging: `https://stg-chat.ironlabs.ai`) |

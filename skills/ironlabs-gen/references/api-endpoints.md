@@ -3,7 +3,7 @@
 ## Base URL & Auth
 
 ```
-Base URL: https://chat.irona.ai/api/v1   (or IRONLABS_BASE_URL if set)
+Base URL: https://www.chat.ironlabs.ai/api/v1   (or IRONLABS_BASE_URL if set)
 Auth:     Authorization: Bearer <IRONLABS_API_KEY>
 ```
 

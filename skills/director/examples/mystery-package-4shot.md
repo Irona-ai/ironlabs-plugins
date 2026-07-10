@@ -88,7 +88,7 @@ Maya comes home to find a mysterious package at her door. Inside is an antique p
 
 ```bash
 # Check balance
-curl -s "${IRONLABS_BASE_URL:-https://chat.irona.ai}/api/v1/chat/balance" \
+curl -s "${IRONLABS_BASE_URL:-https://www.chat.ironlabs.ai}/api/v1/chat/balance" \
   -H "Authorization: Bearer $IRONLABS_API_KEY" | jq '.balance'
 
 # S1 — character ref + scene ref (no ref_video for first segment)

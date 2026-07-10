@@ -4,7 +4,7 @@
  * Gemini analysis via Irona's LLM gateway (direct completions).
  * Zero npm dependencies — uses native fetch.
  * Auth: IRONLABS_API_KEY → POST /api/v1/chat/completions (SSE)
- * Model: gemini-2.5-flash (native in Irona gateway — no OpenRouter connector needed)
+ * Model: google/gemini-3.5-flash (provider/model format required by Irona's completions gateway)
  *
  * Usage:
  *   node gemini.mjs "Explain quantum computing"
@@ -19,14 +19,14 @@
  *   --file <path>         Attach a local file (image/video). Repeatable. ≤20MB inline.
  *   --resolution <level>  low|medium|high|ultra_high (hint only, for prompt context)
  *   --mode <name>         Preset: product, video-script, style
- *   --model <name>        Irona model name (default: gemini-2.5-flash)
+ *   --model <name>        Irona model name (default: google/gemini-3.5-flash)
  *   --temperature <n>     Temperature (default: 1.0)
  *   --max-tokens <n>      Max output tokens (default: 8192)
  *   --json                Request JSON-only response
  *
  * Environment:
  *   IRONLABS_API_KEY      Required. Get one at https://studio.ironlabs.ai → API Keys
- *   IRONLABS_BASE_URL     Optional. Default: https://chat.irona.ai/api/v1
+ *   IRONLABS_BASE_URL     Optional. Default: https://www.chat.ironlabs.ai/api/v1
  */
 
 import fs from "fs/promises";
@@ -38,7 +38,7 @@ if (!IRONLABS_API_KEY) {
   process.exit(1);
 }
 
-const BASE_URL = (process.env.IRONLABS_BASE_URL || "https://chat.irona.ai/api/v1").replace(/\/$/, "");
+const BASE_URL = (process.env.IRONLABS_BASE_URL || "https://www.chat.ironlabs.ai/api/v1").replace(/\/$/, "");
 const MAX_INLINE_SIZE = 20 * 1024 * 1024; // 20MB
 
 const MIME_MAP = {
@@ -98,7 +98,7 @@ function parseArgs(argv) {
   const dataUris = [];
   let resolution = "medium";
   let mode = null;
-  let model = "google/gemini-2.5-flash";
+  let model = "google/gemini-3.5-flash";
   let temperature = 1.0;
   let maxTokens = 8192;
   let jsonMode = false;
@@ -276,7 +276,7 @@ Options:
   --data-uri <uri>      Inline base64 data URI (repeatable, e.g. "data:image/jpeg;base64,...")
   --resolution <level>  low / medium / high / ultra_high (hint only)
   --mode <name>         Preset: product, video-script, style
-  --model <name>        Irona model (default: gemini-2.5-flash)
+  --model <name>        Irona model (default: google/gemini-3.5-flash)
   --temperature <n>     Temperature (default: 1.0)
   --max-tokens <n>      Max output tokens (default: 8192)
   --json                Request JSON-only response

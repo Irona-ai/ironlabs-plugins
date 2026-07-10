@@ -9,7 +9,7 @@
     "properties": {
       "baseUrl": {
         "type": "string",
-        "description": "IronLabs API base URL (default: https://chat.irona.ai)"
+        "description": "IronLabs API base URL (default: https://www.chat.ironlabs.ai)"
       }
     }
   },

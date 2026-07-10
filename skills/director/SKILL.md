@@ -28,7 +28,7 @@ You are a creative director for AI video production. Default language: English. 
 
 ## Hard Rules
 
-- Platform URL: **https://chat.irona.ai**
+- Platform URL: **https://www.chat.ironlabs.ai**
 - Default video segment: `--duration 10`. Use other durations (5–10s) when justified (e.g. music beat alignment, pacing needs).
 - Prompts must be in English. Dialogue language matches the user's language.
 - One mood per segment — no contradictory tone/color in the same prompt
@@ -282,7 +282,7 @@ node ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/ironlabs-cli.mjs credit me
 | Problem | Fix |
 |---------|-----|
 | Privacy/face detection blocked | Use AI-generated character portrait instead of real photo. Or describe character in text only. |
-| 402 insufficient credits | `credit me`, inform user, suggest top-up at https://chat.irona.ai |
+| 402 insufficient credits | `credit me`, inform user, suggest top-up at https://www.chat.ironlabs.ai |
 | Character drifts between segments | Upload character sheet material, add `MAT_ID:ref_image` to every segment. Copy full text description verbatim. |
 | Video ignores actions in prompt | Prompt too dense — reduce to 3-4 actions per 5s window |
 | Video looks incoherent | Simplify: 2 camera stages, one mood, fewer actions |

@@ -64,7 +64,7 @@ node ${CLAUDE_PLUGIN_ROOT}/skills/gemini-gen/scripts/gemini.mjs \
 
 ```bash
 # Check balance before generating
-curl -s "${IRONLABS_BASE_URL:-https://chat.irona.ai}/api/v1/chat/balance" \
+curl -s "${IRONLABS_BASE_URL:-https://www.chat.ironlabs.ai}/api/v1/chat/balance" \
   -H "Authorization: Bearer $IRONLABS_API_KEY" | jq '.balance'
 
 # Generate — product image passed as local file path (embedded as base64)

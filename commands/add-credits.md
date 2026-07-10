@@ -10,7 +10,7 @@ Check your current credit balance and add more credits to your IronLabs account.
 ## Check Balance
 
 ```bash
-BASE_URL="${IRONLABS_BASE_URL:-https://chat.irona.ai}"
+BASE_URL="${IRONLABS_BASE_URL:-https://www.chat.ironlabs.ai}"
 curl -s "$BASE_URL/api/v1/chat/balance" \
   -H "Authorization: Bearer $IRONLABS_API_KEY" | jq '.'
 ```
@@ -20,7 +20,7 @@ curl -s "$BASE_URL/api/v1/chat/balance" \
 Open the billing page in your browser:
 
 ```
-https://chat.irona.ai
+https://www.chat.ironlabs.ai
 ```
 
 Go to **Settings → Billing** to top up your balance or manage your subscription.
@@ -35,4 +35,4 @@ Go to **Settings → Billing** to top up your balance or manage your subscriptio
 
 > **Note:** Unused credits reset each billing cycle and do not carry forward.
 
-Visit [https://chat.irona.ai](https://chat.irona.ai) to upgrade or view full pricing at [https://docs.irona.ai/pricing/pricing](https://docs.irona.ai/pricing/pricing).
+Visit [https://www.chat.ironlabs.ai](https://www.chat.ironlabs.ai) to upgrade or view full pricing at [https://docs.irona.ai/pricing/pricing](https://docs.irona.ai/pricing/pricing).

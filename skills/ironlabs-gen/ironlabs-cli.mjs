@@ -171,14 +171,11 @@ var IronlabsClient = class {
   }
   // ---- Credit ----
   async getMe() {
-    const studioUrl = (process.env.IRONLABS_STUDIO_URL ?? "https://studio.ironlabs.ai").replace(/\/$/, "");
-    const res = await fetch(`${studioUrl}/api/v1/balance`, {
-      headers: { Authorization: `Bearer ${this.apiKey}` },
-    });
-    if (res.status === 401) throw new AuthError({});
-    const data = await res.json();
-    const raw = data.data?.topupBalance ?? 0;
-    const balance = typeof raw === "string" ? parseFloat(raw) : raw;
+    const data = await this.request("GET", "/chat/balance");
+    const balance = data.data?.totalBalance ?? data.balance;
+    if (typeof balance !== "number") {
+      throw new ApiError(500, data, "Balance response did not include a totalBalance value");
+    }
     return { user: { id: "ironlabs-user", balance }, balance };
   }
   async estimateCost(params = {}) {
@@ -476,7 +473,7 @@ function env(key, fallback) {
   }
   return v;
 }
-var DEFAULT_BASE_URL = "https://chat.irona.ai/api/v1";
+var DEFAULT_BASE_URL = "https://www.chat.ironlabs.ai/api/v1";
 var IMAGE_MODELS = /* @__PURE__ */ new Set(["gpt-image-2", "nano-banana-2", "nano-banana-pro", "midjourney-v7", "midjourney"]);
 
 function createClient(baseUrlOverride, allowAnonymous = false) {
@@ -530,7 +527,7 @@ Environment:
   IRONLABS_API_KEY   IronLabs API key — all requests (balance, generation, uploads)
                      Get one at https://studio.ironlabs.ai → API Keys
   IRONLABS_BASE_URL  (optional) Full API base URL
-                     Default: https://chat.irona.ai/api/v1
+                     Default: https://www.chat.ironlabs.ai/api/v1
 
 Global Flags:
   --base-url <url>   Override API base URL for this command
