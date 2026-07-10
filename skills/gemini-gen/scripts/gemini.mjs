@@ -26,7 +26,7 @@
  *
  * Environment:
  *   IRONLABS_API_KEY      Required. Get one at https://studio.ironlabs.ai → API Keys
- *   IRONLABS_BASE_URL     Optional. Default: https://chat.irona.ai/api/v1
+ *   IRONLABS_BASE_URL     Optional. Default: https://www.chat.ironlabs.ai/api/v1
  */
 
 import fs from "fs/promises";
@@ -38,7 +38,7 @@ if (!IRONLABS_API_KEY) {
   process.exit(1);
 }
 
-const BASE_URL = (process.env.IRONLABS_BASE_URL || "https://chat.irona.ai/api/v1").replace(/\/$/, "");
+const BASE_URL = (process.env.IRONLABS_BASE_URL || "https://www.chat.ironlabs.ai/api/v1").replace(/\/$/, "");
 const MAX_INLINE_SIZE = 20 * 1024 * 1024; // 20MB
 
 const MIME_MAP = {

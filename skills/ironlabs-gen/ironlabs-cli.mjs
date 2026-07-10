@@ -473,7 +473,7 @@ function env(key, fallback) {
   }
   return v;
 }
-var DEFAULT_BASE_URL = "https://chat.irona.ai/api/v1";
+var DEFAULT_BASE_URL = "https://www.chat.ironlabs.ai/api/v1";
 var IMAGE_MODELS = /* @__PURE__ */ new Set(["gpt-image-2", "nano-banana-2", "nano-banana-pro", "midjourney-v7", "midjourney"]);
 
 function createClient(baseUrlOverride, allowAnonymous = false) {
@@ -527,7 +527,7 @@ Environment:
   IRONLABS_API_KEY   IronLabs API key — all requests (balance, generation, uploads)
                      Get one at https://studio.ironlabs.ai → API Keys
   IRONLABS_BASE_URL  (optional) Full API base URL
-                     Default: https://chat.irona.ai/api/v1
+                     Default: https://www.chat.ironlabs.ai/api/v1
 
 Global Flags:
   --base-url <url>   Override API base URL for this command

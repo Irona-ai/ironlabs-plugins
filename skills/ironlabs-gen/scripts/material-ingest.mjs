@@ -14,7 +14,7 @@
  *
  * Environment:
  *   IRONLABS_API_KEY   Required (for Gemini analysis via Irona gateway)
- *   IRONLABS_BASE_URL  Optional (default: https://chat.irona.ai)
+ *   IRONLABS_BASE_URL  Optional (default: https://www.chat.ironlabs.ai)
  */
 
 import fs from "fs";
