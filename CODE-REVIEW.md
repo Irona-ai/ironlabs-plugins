@@ -1,8 +1,8 @@
 # Code Review — ironlabs-plugin
 
-> Review of branch `add-claude-review` vs `main`. Analysis only — no code was changed.
-> Every finding below was verified against the **current** code (tsc, `node --check`,
-> grep), not inferred from the diff. Findings reference `file:line`.
+> Review of branch `add-claude-review` vs `main`. Every finding was verified against the
+> code (tsc, `node --check`, grep). **All findings below have since been fixed in this
+> branch** — status is marked ✅ on each item; see "Fixes applied" at the bottom.
 
 ## Overview
 
@@ -19,9 +19,9 @@ main story of this branch and are listed first.
 
 ---
 
-## 🔴 Show-stoppers (introduced by the balance refactor — fix before merge)
+## 🔴 Show-stoppers (introduced by the balance refactor)
 
-### 1. `src/credits-cache.ts` does not compile — stray closing brace
+### 1. ✅ `src/credits-cache.ts` does not compile — stray closing brace
 `src/credits-cache.ts:80` has an extra `}` (the `refreshFromApi` body closes at `:79`).
 Verified:
 - `npx tsc --noEmit` → `src/credits-cache.ts(80,1): error TS1128: Declaration or statement expected.`
@@ -35,7 +35,7 @@ balance widget renders nothing on every refresh.** The mangled indentation from
 
 **Fix:** delete the extra `}` at `:80`.
 
-### 2. `ironlabs-cli.mjs` `getMe()` references an undefined variable `raw`
+### 2. ✅ `ironlabs-cli.mjs` `getMe()` references an undefined variable `raw`
 `skills/ironlabs-gen/ironlabs-cli.mjs:195-209`:
 ```js
 const data = await this.request("GET", "/chat/balance");
@@ -57,7 +57,7 @@ broken**, and any code path that calls `getMe()` fails.
 
 ## 🟠 Stale references left by the migration
 
-### 3. `match-materials.mjs` output is incompatible with the current CLI
+### 3. ✅ `match-materials.mjs` output is incompatible with the current CLI
 The workflow migrated from `video-gen.sh --materials "path:role"` to uploaded material
 **IDs** (`task generate --materials "194:ref_image"`). But
 `skills/ironlabs-gen/scripts/match-materials.mjs:97-124` still emits **localPath**-based
@@ -67,11 +67,11 @@ now-deleted `video-gen.sh`. Fed to the CLI, `buildCreateParams` does
 silently dropped**. This script is referenced live from `SKILL.md` and `visual-dev.md`,
 so it produces flags that don't work.
 
-### 4. `ref_video` residue in `api-endpoints.md`
+### 4. ✅ `ref_video` residue in `api-endpoints.md`
 The branch correctly purged `ref_video` everywhere (it is no longer a supported role)
 **except** `skills/ironlabs-gen/references/api-endpoints.md`, which still mentions it.
 
-### 5. Version numbers still not reconciled
+### 5. ✅ Version numbers still not reconciled
 Manifests are `0.2.1` (`marketplace.json:8`, `plugin.json:4`, `openclaw.plugin.json:5`),
 but `package.json:3` is `0.1.0` and all four `SKILL.md` are `0.1.0` (director was
 *downgraded* 0.3.0→0.1.0 in this branch). No single source of truth.
@@ -80,11 +80,13 @@ but `package.json:3` is `0.1.0` and all four `SKILL.md` are `0.1.0` (director wa
 
 ## 🟢 Dead code / repo hygiene
 
-- **Committed build artifact:** `skills/director/scripts/__pycache__/analyze-beats.cpython-314.pyc`
-  is tracked (this branch adds it) and is **not** in `.gitignore`. Remove it and add
-  `__pycache__/` + `*.pyc` to `.gitignore`.
+- **✅ Committed build artifact:** `__pycache__/analyze-beats.cpython-314.pyc` was tracked
+  and not ignored. Untracked (`git rm --cached`), deleted, and `__pycache__/` + `*.pyc`
+  added to `.gitignore`.
 - **`index.mjs`** — `export default function register() {}` is a no-op stub, wired via
-  `package.json` `openclaw.extensions` (`:5-7`). Does nothing.
+  `package.json` `openclaw.extensions` (`:5-7`). Does nothing. **Left in place** — it's the
+  OpenClaw extension entry point the manifest expects; removing it needs an OpenClaw-side
+  decision, not a code cleanup.
 - **`CODE-REVIEW.md` (this file's prior content)** — was a point-in-time artifact that
   had gone stale: it still told readers to "delete `upload.mjs`" (already deleted in this
   branch) and listed text-to-video, command-injection, unsorted-lists, and the
@@ -95,10 +97,9 @@ but `package.json:3` is `0.1.0` and all four `SKILL.md` are `0.1.0` (director wa
 
 ## ⚪ Lower severity / nits
 
-- **`gemini.mjs` doc mismatch:** `--temperature`/`--max-tokens` are rejected by the API,
-  so the code now correctly warns "not supported, ignored" (`:315-320`). But the header
-  and `--help` still advertise `(default: 1.0)` / `(default: 8192)` as if they work
-  (`:23-24`, `:285-286`).
+- **✅ `gemini.mjs` doc mismatch:** the header and `--help` advertised `(default: 1.0)` /
+  `(default: 8192)` for `--temperature`/`--max-tokens` as if they worked; both now read
+  "Not supported by the gateway — ignored" to match the runtime warning.
 - **`src/index.ts` `runPreviousStatusLine` (`:43-59`)** runs an arbitrary shell command
   from `~/.ironlabs/previous-statusline.json` on every refresh. It is the user's own saved
   config, the code documents it, and setup now `chmod 600`s the file — risk is low, but it
@@ -121,11 +122,28 @@ but `package.json:3` is `0.1.0` and all four `SKILL.md` are `0.1.0` (director wa
 
 ---
 
-## Highest-value fixes, in order
+## Fixes applied (this pass)
 
-1. **`credits-cache.ts:80`** — delete the extra `}`. Restores the statusLine build.
-2. **`ironlabs-cli.mjs:195`** — add the missing `const raw = …`. Restores `credit me`.
-3. **`match-materials.mjs`** — emit uploaded material IDs (or document an upload step);
-   otherwise the tool produces non-working `--materials` flags.
-4. Remove the committed `.pyc` and gitignore `__pycache__/`.
-5. Reconcile version numbers; scrub the last `ref_video` mention from `api-endpoints.md`.
+1. **`credits-cache.ts`** — removed the stray `}` and re-indented the block.
+   `npx tsc --noEmit` now passes; the statusLine builds again.
+2. **`ironlabs-cli.mjs` `getMe()`** — added `const raw = data.data?.totalBalance ?? data.balance`.
+   `credit me` no longer throws `ReferenceError`; `credit estimate` smoke-tested OK.
+3. **`match-materials.mjs`** — stderr summary now prints the `material upload` command per
+   matched file and a `--materials "${VAR}:role"` template instead of bare paths; header
+   comment updated (no more `video-gen.sh`). Smoke-tested against a fixture.
+4. **`.pyc`** — untracked + deleted; `__pycache__/` and `*.pyc` added to `.gitignore`.
+5. **Versions** — `package.json` and all four `SKILL.md` bumped `0.1.0` → `0.2.1` to match
+   the manifests (now a single version everywhere).
+6. **`api-endpoints.md`** — removed the last `ref_video` role row.
+7. **`gemini.mjs`** — docs/`--help` for `--temperature`/`--max-tokens` now say "not
+   supported — ignored".
+
+Verification: `npx tsc --noEmit` clean; `node --check` passes on all `.mjs`; no `ref_video`
+references remain outside this file; all manifests + skills report `0.2.1`.
+
+### Not changed (intentionally)
+
+- **`index.mjs` no-op stub** — it is the OpenClaw extension entry the manifest points at;
+  removal is an OpenClaw-integration decision, not a code cleanup.
+- **`runPreviousStatusLine` `execSync`** — low risk (user's own config, `chmod 600`); left
+  as-is and documented.
