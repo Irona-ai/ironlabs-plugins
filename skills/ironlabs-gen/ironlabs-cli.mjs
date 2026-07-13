@@ -194,9 +194,18 @@ var IronlabsClient = class {
   // ---- Credit ----
   async getMe() {
     const data = await this.request("GET", "/chat/balance");
-    const raw = data.data?.totalBalance ?? data.balance ?? 0;
-    const dollars = typeof raw === "string" ? parseFloat(raw) : raw;
-    const balance = typeof dollars === "number" && !isNaN(dollars) ? Math.round(dollars * 100) : 0; // totalBalance is in dollars — normalize to cents
+    if (raw == null) {
+  throw new ApiError(500, data, "Balance response did not include a totalBalance value");
+}
+
+const dollars = typeof raw === "string" ? parseFloat(raw) : raw;
+
+if (typeof dollars !== "number" || Number.isNaN(dollars)) {
+  throw new ApiError(500, data, "Balance response did not include a valid totalBalance value");
+}
+
+// totalBalance is in dollars; normalize to cents.
+const balance = Math.round(dollars * 100);
     return { user: { id: "ironlabs-user", balance }, balance };
   }
   async estimateCost(params = {}) {
@@ -506,6 +515,7 @@ function env(key, fallback) {
   return v;
 }
 var DEFAULT_BASE_URL = "https://www.chat.ironlabs.ai/api/v1";
+var IMAGE_MODELS = /* @__PURE__ */ new Set(["gpt-image-2", "nano-banana-2", "nano-banana-pro", "midjourney-v7", "midjourney"]);
 
 function createClient(baseUrlOverride, allowAnonymous = false) {
   loadEnv();

@@ -119,7 +119,7 @@ node ${CLAUDE_SKILL_DIR}/scripts/gemini.mjs --json "Return a JSON object with na
 | `--file <path>`        | —                          | Attach local file (repeatable, ≤20MB inline)    |
 | `--data-uri <uri>`     | —                          | Inline base64 data URI (repeatable, for pasted images) |
 | `--resolution <level>` | `medium`                   | Hint only: `low` / `medium` / `high` / `ultra_high` |
-| `--model <name>`       | `gemini-3.5-flash`         | Irona model name                                |
+| `--model <name>`       | `google/gemini-3.5-flash`         | IronLabs model name                                |
 | `--temperature <n>`    | `1.0`                      | Not supported by the Irona completions API — accepted for CLI compatibility but ignored (prints a warning) |
 | `--max-tokens <n>`     | `8192`                     | Not supported by the Irona completions API — accepted for CLI compatibility but ignored (prints a warning) |
 | `--json`               | off                        | Append JSON-only instruction to prompt          |

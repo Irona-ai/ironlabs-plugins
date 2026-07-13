@@ -28,3 +28,13 @@ https://www.chat.ironlabs.ai/
 ```
 
 Go to **Settings → Billing** to top up your balance or manage your subscription.
+
+## Subscription Plans
+
+| Plan | Price | Routing Requests | Key Features |
+|---|---|---|---|
+| Exploration | Free | Up to 10k/month | Intelligent cost/latency optimization, fallback routing, personalized router, prompt adaptation |
+| Pro | $50/month | Unlimited (overage: $10/million after the first 10k free requests) | All Exploration features + multimodal input support, data privacy via hashing |
+| Enterprise | Custom Pricing | Custom | All Pro features + VPC deployments, custom integration & support, Slack hands-on support, permission management, self-hosting |
+
+> **Note:** Unused message or image credits reset each billing cycle and do not carry forward.
