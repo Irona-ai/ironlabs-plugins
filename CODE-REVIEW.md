@@ -1,7 +1,8 @@
 # Code Review — ironlabs-plugin
 
-> Review of the full branch (`main`). Analysis only — no code was changed.
-> Findings are grouped by severity and reference `file:line`.
+> Review of branch `add-claude-review` vs `main`. Analysis only — no code was changed.
+> Every finding below was verified against the **current** code (tsc, `node --check`,
+> grep), not inferred from the diff. Findings reference `file:line`.
 
 ## Overview
 
@@ -9,154 +10,122 @@ This is the `ironlabs` Claude Code / OpenClaw plugin: a statusLine balance widge
 (`src/`), a generation CLI (`skills/ironlabs-gen/ironlabs-cli.mjs`), skill docs,
 hooks, and helper scripts.
 
-The code mostly works, but it carries scar tissue from **three rebrands/rewires**
-(renoise→ironlabs, Fal→OpenRouter, chat-API→studio-API). The result is a large set
-of **doc-vs-code contradictions**, a few **real bugs**, and some **dead code**.
-Nothing is catastrophic, but the docs actively misdescribe how the code behaves in
-several places.
+The previous version of this file described a set of bugs (text-to-video, command
+injection, unsorted lists, FAL/OpenRouter contradictions, etc.) that were **already
+fixed** in commit `ffe6c76` (`claude-code-fixes`). That fix pass, however, **botched
+two edits** in the balance dollars→cents refactor and shipped the two headline
+features — the statusLine and `credit me` — broken. Those two regressions are the
+main story of this branch and are listed first.
 
 ---
 
-## 🔴 Correctness bugs (will break real usage)
+## 🔴 Show-stoppers (introduced by the balance refactor — fix before merge)
 
-### 1. Documented "text-to-video" is impossible in code
-`ironlabs-cli.mjs:255` throws `"Video generation requires a reference image"` when no
-`first_frame`/`ref_image` material is passed. But every text-to-video example ships
-without materials: `skills/ironlabs-gen/SKILL.md:36-40` ("Text-to-Video — 10s") and
-`skills/director/SKILL.md` (Path 1). Any user following the quick-start hits a hard
-error. Either support t2v in code, or stop advertising it.
+### 1. `src/credits-cache.ts` does not compile — stray closing brace
+`src/credits-cache.ts:80` has an extra `}` (the `refreshFromApi` body closes at `:79`).
+Verified:
+- `npx tsc --noEmit` → `src/credits-cache.ts(80,1): error TS1128: Declaration or statement expected.`
+- brace balance for the file is `-1`.
 
-### 2. Balance unit mismatch (cents vs dollars)
-The renderer and thresholds treat `balance` as **cents** — `src/render/credits-line.ts:17-18`
-(`THRESHOLD_LOW = 500 // $5`), `:26` (`cents/100`). But `src/credits-cache.ts:68-72`
-writes `topupBalance` **raw** (`parseFloat`) into that field, and
-`ironlabs-cli.mjs:180-182` does the same in `getMe()`. If the Studio API returns
-dollars (e.g. `"12.34"`), the status bar shows **$0.12** and the low/zero-balance
-logic misfires. This also feeds `hooks/check-api-key.sh:18-22`, which could **block
-all generation** on a misparsed balance.
+The statusLine is invoked directly as `… src/index.ts` via tsx/node
+(`commands/setup.md:93-98`), and `index.ts` imports `credits-cache.js`. The module
+fails to parse, so `index.ts` never loads and `main().catch()` never runs — **the
+balance widget renders nothing on every refresh.** The mangled indentation from
+`:67` down is the tell that this was a bad hand-edit.
 
-### 3. `credit estimate` fallback models don't exist in the pricing table
-`ironlabs-cli.mjs:989-990` falls back to `"black-forest-labs/flux-dev"` /
-`"bytedance/seedance-1.5"`, but `OR_PRICING` (`:85-90`) only has `bytedance/seedance-2.0`
-etc. Estimating with an unknown model always returns `credits: 0, note: "No pricing data"`.
-This block also **duplicates** `estimateCost()` (`:184`) instead of calling it — the two
-can drift (and already have).
+**Fix:** delete the extra `}` at `:80`.
 
-### 4. `analyze-beats.py` imports `scipy` but doesn't declare it
-`skills/director/scripts/analyze-beats.py:45` does `from scipy.signal import find_peaks`,
-but the documented install is only `librosa numpy soundfile` (`:14`, `:26`). It crashes
-on a clean install. Also `np.round(tempo, 1)` (`:37`) breaks on modern librosa where
-`tempo` is an ndarray (`float(array)` throws). The 5–15s constraint also contradicts the
-5–10s model limit stated elsewhere.
+### 2. `ironlabs-cli.mjs` `getMe()` references an undefined variable `raw`
+`skills/ironlabs-gen/ironlabs-cli.mjs:195-209`:
+```js
+const data = await this.request("GET", "/chat/balance");
+if (raw == null) {              // ← `raw` is never declared
+```
+The assignment `const raw = data.data?.totalBalance ?? data.balance` was dropped.
+`raw` is read at `:197` and `:201` but grep confirms it is never assigned. The file
+passes `node --check` (it's a valid reference syntactically) but throws
+`ReferenceError: raw is not defined` at runtime. It is not an `ApiError`, so it
+escapes to `throw e` at `:1112` → uncaught stack trace. **`credit me` is completely
+broken**, and any code path that calls `getMe()` fails.
 
-### 5. `gemini.mjs` silently drops `--temperature`, `--max-tokens`, `--resolution`
-All three are parsed (`skills/gemini-gen/scripts/gemini.mjs:113-115`) but never put in
-the request body — `callCompletions` only sends `models, messages, stream, conversationId`
-(`:225-231`). Setting temperature/max-tokens does nothing. The `...(jsonMode ? {} : {})`
-spread at `:230` is a literal no-op.
+**Fix:** add `const raw = data.data?.totalBalance ?? data.balance;` before `:197`.
+
+> Both bugs are the *same* refactor (normalize balance to cents) applied twice and
+> fumbled both times.
 
 ---
 
-## 🟠 Doc-vs-code contradictions
+## 🟠 Stale references left by the migration
 
-### 6. FAL vs OpenRouter — docs and code disagree completely
-Code routes everything through the **openrouter** connector (`ironlabs-cli.mjs:235`,
-`:271`) with OpenRouter model IDs (`x-ai/grok-imagine-video`, `bytedance/seedance-2.0`,
-`google/gemini-3.1-flash-image-preview`). But `skills/ironlabs-gen/SKILL.md:25` says the
-backend is `POST /api/v1/mcp/fal` (`fal_run`), and its model table (`:56-64`) lists
-**FAL** models (`fal-ai/minimax/video-01`, `fal-ai/flux/dev`) that appear nowhere in the
-code. The entire model table and every "Fal AI connector" error message are wrong.
+### 3. `match-materials.mjs` output is incompatible with the current CLI
+The workflow migrated from `video-gen.sh --materials "path:role"` to uploaded material
+**IDs** (`task generate --materials "194:ref_image"`). But
+`skills/ironlabs-gen/scripts/match-materials.mjs:97-124` still emits **localPath**-based
+flags (`assets/char.jpg:ref_image`), and its header comment (`:17`) references the
+now-deleted `video-gen.sh`. Fed to the CLI, `buildCreateParams` does
+`parseInt("assets/char.jpg")` → `NaN` → `readMaterial(NaN)` → null → **the material is
+silently dropped**. This script is referenced live from `SKILL.md` and `visual-dev.md`,
+so it produces flags that don't work.
 
-### 7. Gemini connector story is contradictory
-`skills/gemini-gen/SKILL.md:148` and `gemini.mjs:6` correctly say Gemini runs **natively**
-through the Irona gateway ("no OpenRouter connector required"). But `commands/setup.md:153`
-and `openclaw.plugin.json:4` tell users gemini-gen needs an **OpenRouter connector**. And
-`skills/ironlabs-gen/SKILL.md:129` says material-ingest analyzes "via OpenRouter connector"
-— it actually shells out to the native `gemini.mjs`.
+### 4. `ref_video` residue in `api-endpoints.md`
+The branch correctly purged `ref_video` everywhere (it is no longer a supported role)
+**except** `skills/ironlabs-gen/references/api-endpoints.md`, which still mentions it.
 
-### 8. `add-credits.md` hits a different (likely stale) balance endpoint + wrong pricing
-`commands/add-credits.md:14` queries `/api/v1/chat/balance`, but the migration commit
-moved balance to `studio.ironlabs.ai/api/v1/balance` (used everywhere else). The
-subscription table (`:30-34`) — "Exploration/Pro/Enterprise", "Routing Requests",
-"$10/million" — is clearly copied from an LLM-router product, not a video-credit product.
-
-### 9. `HELP_CREDIT` says history is "(not available)" but it's implemented
-`ironlabs-cli.mjs:650` documents `history (not available)`, yet `creditHistory` /
-`getCreditHistory` are fully implemented (`:910`, `:194`) hitting `/chat/transactions`
-(which, like #8, may not exist post-migration).
-
-### 10. Version numbers inconsistent across every manifest
-`package.json:3` 0.1.0 · marketplace/plugin/openclaw 0.2.0 · ironlabs-gen SKILL 0.1.0 ·
-gemini/video/director SKILL 0.3.0. No single source of truth.
-
-### 11. `IRONLABS_STUDIO_URL` is used but documented nowhere
-Referenced in `src/credits-cache.ts:60` and `ironlabs-cli.mjs:174`, but absent from the
-README env table, `--help`, and setup. Meanwhile `getMe()` and `refreshFromApi` **ignore**
-`IRONLABS_BASE_URL`/`--base-url`, so `credit me` against a staging instance silently hits
-prod Studio.
-
-### 12. README installation numbering is broken
-`README.md:36` — step "3. Launch Claude Code" appears *after* the OpenClaw section, so
-under "Claude Code" the steps read 1, 2, … 3-elsewhere.
+### 5. Version numbers still not reconciled
+Manifests are `0.2.1` (`marketplace.json:8`, `plugin.json:4`, `openclaw.plugin.json:5`),
+but `package.json:3` is `0.1.0` and all four `SKILL.md` are `0.1.0` (director was
+*downgraded* 0.3.0→0.1.0 in this branch). No single source of truth.
 
 ---
 
-## 🟢 Dead code / unused
+## 🟢 Dead code / repo hygiene
 
-- **`skills/ironlabs-gen/scripts/upload.mjs`** — not referenced by any skill, script, or
-  doc (confirmed via grep). Its header says it requires `IRONLABS_API_KEY` "for
-  authentication context, not used in upload" — demands a key it never uses (`:20-24`).
-  Whole file is dead.
-- **`client.generate()`** `ironlabs-cli.mjs:331` — defined, never called. Also passes
-  `options` to `waitForTask`, which takes no such param (`:305`). `taskGenerate`
-  re-implements it inline instead.
-- **`index.mjs`** — `export default function register() {}` is a no-op stub wired via
+- **Committed build artifact:** `skills/director/scripts/__pycache__/analyze-beats.cpython-314.pyc`
+  is tracked (this branch adds it) and is **not** in `.gitignore`. Remove it and add
+  `__pycache__/` + `*.pyc` to `.gitignore`.
+- **`index.mjs`** — `export default function register() {}` is a no-op stub, wired via
   `package.json` `openclaw.extensions` (`:5-7`). Does nothing.
-- **`configSchema.baseUrl`** in `openclaw.plugin.json:10` — never read; code only uses the
-  `IRONLABS_BASE_URL` env var.
-- **`printResult`** references `result.coverUrl` and `result.warning`
-  (`ironlabs-cli.mjs:956-958`) — `coverUrl` is always written `null`, `warning` never set.
-- **Cruft comments** describing prior backends: `upload.mjs:8-10`
-  ("Backend change: … was: POST https://ironlabs.ai/…").
+- **`CODE-REVIEW.md` (this file's prior content)** — was a point-in-time artifact that
+  had gone stale: it still told readers to "delete `upload.mjs`" (already deleted in this
+  branch) and listed text-to-video, command-injection, unsorted-lists, and the
+  FAL/OpenRouter contradiction as open — all fixed. A committed review that misdescribes
+  the code is worse than none; keep it regenerated or drop it from the repo.
 
 ---
 
 ## ⚪ Lower severity / nits
 
-- **`slice()` before `filter()`** in `listLocalTasks:52-57` and `listLocalMaterials:74-80`:
-  limit/type filtering is applied *after* truncation, so `--limit N` / `--type video` can
-  return fewer than N. Lists are also unsorted (filesystem order, not recency).
-- **`Date.now()` as ID** for tasks/materials/assets/characters (`:223`, `:337`, …) —
-  collisions overwrite if two are created in the same millisecond (a risk in tight batch loops).
-- **Resolution map is lossy/misleading**: `"4k": "1080p"` (`:267`) — asking for 4k silently
-  yields 1080p.
-- **`download-fallback.sh` filename length differs by OS**: `md5 -q` gives 32 chars on
-  macOS, the `md5sum … head -c 12` fallback gives 12 (`:17`) — same URL can dedup-miss across
-  platforms. The button/input scraping (`grep -P '@\w+(?=…)'`, `sed -n '2p'`) is very brittle.
-- **`credit estimate` / `estimatedCredit` always return 0** (`:250`, `:282`) — cost is never
-  surfaced despite the director skill telling you to check budget.
+- **`gemini.mjs` doc mismatch:** `--temperature`/`--max-tokens` are rejected by the API,
+  so the code now correctly warns "not supported, ignored" (`:315-320`). But the header
+  and `--help` still advertise `(default: 1.0)` / `(default: 8192)` as if they work
+  (`:23-24`, `:285-286`).
+- **`src/index.ts` `runPreviousStatusLine` (`:43-59`)** runs an arbitrary shell command
+  from `~/.ironlabs/previous-statusline.json` on every refresh. It is the user's own saved
+  config, the code documents it, and setup now `chmod 600`s the file — risk is low, but it
+  remains an unguarded `execSync` on every status tick.
 
 ---
 
-## Security notes (low, but worth flagging)
+## Verified fixed since the last review (for the record)
 
-- **Command injection surface** in `skills/ironlabs-gen/scripts/material-ingest.mjs:98-101`:
-  `execSync` interpolates `filePath` into a double-quoted shell arg without escaping. A
-  filename containing `"` / `$(...)` / backticks executes. The prompt is single-quote-escaped,
-  but the path isn't. Prefer `execFileSync(node, [GEMINI_PATH, "--file", filePath, …])`.
-- **Arbitrary command execution** in `src/index.ts:44-50`: `runPreviousStatusLine` runs
-  whatever command is in `~/.ironlabs/previous-statusline.json` via bash. It's the user's own
-  saved config so risk is low, but it's an unguarded `execSync` on every status refresh.
+- Text-to-video no longer hard-errors — `image_url` is omitted for pure t2v
+  (`ironlabs-cli.mjs:290-299`).
+- `material-ingest.mjs` uses `execFileSync` with an argv array — command-injection surface
+  closed (`:98-102`).
+- Local task/material lists sort by id before slicing (`:72`, `:99`).
+- `nextId()` folds `process.pid` + a sequence so same-millisecond creates don't collide
+  (`:44-48`).
+- `credit estimate` surfaces "no pricing data" for unknown aliases instead of silently
+  repricing against the default (`:211-231`).
+- FAL→OpenRouter story is now consistent across the SKILL docs and `setup.md`.
 
 ---
 
 ## Highest-value fixes, in order
 
-1. Reconcile the **FAL vs OpenRouter** story (#6/#7) — decide the real backend and make code
-   + all SKILL model tables agree.
-2. Fix the **balance unit** bug (#2) — it silently breaks the headline feature and the
-   Bash-blocking hook.
-3. Either support **text-to-video** or stop documenting it (#1).
-4. Fix **`analyze-beats.py`** deps + tempo handling (#4).
-5. Delete the confirmed dead code (`upload.mjs`, `client.generate`, `index.mjs` stub,
-   `configSchema.baseUrl`).
+1. **`credits-cache.ts:80`** — delete the extra `}`. Restores the statusLine build.
+2. **`ironlabs-cli.mjs:195`** — add the missing `const raw = …`. Restores `credit me`.
+3. **`match-materials.mjs`** — emit uploaded material IDs (or document an upload step);
+   otherwise the tool produces non-working `--materials` flags.
+4. Remove the committed `.pyc` and gitignore `__pycache__/`.
+5. Reconcile version numbers; scrub the last `ref_video` mention from `api-endpoints.md`.
