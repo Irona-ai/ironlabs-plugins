@@ -1,0 +1,86 @@
+/**
+ * StatusLine entry point for IronLabs plugin.
+ * If user had a previous statusLine command (e.g. claude-hud), runs it and
+ * merges its output with the balance display.
+ *
+ * Previous statusLine is saved to ~/.ironlabs/previous-statusline.json during setup.
+ *
+ * Manual test:
+ *   echo '{}' | npx tsx src/index.ts
+ */
+
+import fs from 'fs'
+import path from 'path'
+import os from 'os'
+import { execSync } from 'child_process'
+import { getBalance, refreshFromApi } from './credits-cache.js'
+import { renderCreditsLine } from './render/credits-line.js'
+
+const PREVIOUS_STATUSLINE_FILE = path.join(os.homedir(), '.ironlabs/previous-statusline.json')
+
+// ── Stdin reading ───────────────────────────────────────────────────────
+async function readStdinRaw(): Promise<string> {
+  if (process.stdin.isTTY) return ''
+
+  const chunks: string[] = []
+  try {
+    process.stdin.setEncoding('utf8')
+    for await (const chunk of process.stdin) {
+      chunks.push(chunk as string)
+    }
+  } catch {
+    // ignore
+  }
+  return chunks.join('')
+}
+
+// ── Previous statusLine integration ─────────────────────────────────────
+function runPreviousStatusLine(stdinData: string): string {
+  try {
+    const raw    = fs.readFileSync(PREVIOUS_STATUSLINE_FILE, 'utf-8')
+    const config = JSON.parse(raw) as { command?: string }
+    if (!config.command) return ''
+
+    return execSync(config.command, {
+      input: stdinData,
+      encoding: 'utf8',
+      timeout: 5000,
+      env: { ...process.env },
+      shell: '/bin/bash',
+    }).trimEnd()
+  } catch {
+    return ''
+  }
+}
+
+// ── Main ────────────────────────────────────────────────────────────────
+async function main() {
+  const stdinData = await readStdinRaw()
+
+  // Run previous statusLine command if configured (e.g. claude-hud)
+  const previousOutput = runPreviousStatusLine(stdinData)
+
+  // Get balance from local file cache (fast, no network)
+  let { data, fresh } = getBalance()
+
+  // If no cache at all, wait for a live fetch before rendering
+  if (!data) {
+    await refreshFromApi().catch(() => {})
+    data = getBalance().data
+  } else if (!fresh) {
+    // Cache exists but stale — refresh in background, render immediately
+    refreshFromApi().catch(() => {})
+  }
+
+  const balanceLine = renderCreditsLine(data)
+
+  // Merge: previous statusLine output first, then balance line
+  if (previousOutput) {
+    console.log(previousOutput)
+  }
+  console.log(balanceLine)
+}
+
+main().catch(() => {
+  // statusLine must never crash — silent fail
+})

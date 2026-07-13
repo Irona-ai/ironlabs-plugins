@@ -1,0 +1,22 @@
+{
+  "id": "ironlabs",
+  "name": "IronLabs",
+  "description": "AI video production skills — creative direction, video/image generation (Fal.ai), multimodal analysis (Gemini via OpenRouter), and video download.",
+  "version": "0.2.0",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "baseUrl": {
+        "type": "string",
+        "description": "IronLabs API base URL (default: https://chat.irona.ai)"
+      }
+    }
+  },
+  "skills": [
+    "skills/director",
+    "skills/gemini-gen",
+    "skills/ironlabs-gen",
+    "skills/video-download"
+  ]
+}

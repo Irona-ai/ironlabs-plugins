@@ -1,0 +1,13 @@
+{
+  "name": "ironlabs-plugin",
+  "owner": { "name": "IronLabs AI" },
+  "description": "Official Claude Code plugins by IronLabs",
+  "plugins": [
+    {
+      "name": "ironlabs",
+      "version": "0.2.0",
+      "source": "./",
+      "description": "AI skills for video production including creative direction, generation, editing, and e-commerce content creation"
+    }
+  ]
+}
