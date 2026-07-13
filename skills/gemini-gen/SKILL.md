@@ -2,14 +2,14 @@
 name: gemini-gen
 description: >
   Visual understanding and multimodal analysis via Irona's LLM gateway
-  (google/gemini-3.5-flash — no OpenRouter connector required). Handles product analysis,
+  (gemini-3.5-flash — no OpenRouter connector required). Handles product analysis,
   video script extraction, and style analysis from images and videos.
   Backend: POST /api/v1/chat/completions (SSE).
   Do NOT use for generating images or videos — use ironlabs-gen for that.
 allowed-tools: Bash, Read
 metadata:
   author: ironlabs
-  version: 0.3.0
+  version: 0.1.0
   category: video-production
   tags: [gemini, vision, multimodal, analysis]
 ---
@@ -119,9 +119,9 @@ node ${CLAUDE_SKILL_DIR}/scripts/gemini.mjs --json "Return a JSON object with na
 | `--file <path>`        | —                          | Attach local file (repeatable, ≤20MB inline)    |
 | `--data-uri <uri>`     | —                          | Inline base64 data URI (repeatable, for pasted images) |
 | `--resolution <level>` | `medium`                   | Hint only: `low` / `medium` / `high` / `ultra_high` |
-| `--model <name>`       | `google/gemini-3.5-flash`         | Irona model name                                |
-| `--temperature <n>`    | `1.0`                      | Temperature                                     |
-| `--max-tokens <n>`     | `8192`                     | Max output tokens                               |
+| `--model <name>`       | `google/gemini-3.5-flash`         | IronLabs model name                                |
+| `--temperature <n>`    | `1.0`                      | Not supported by the Irona completions API — accepted for CLI compatibility but ignored (prints a warning) |
+| `--max-tokens <n>`     | `8192`                     | Not supported by the Irona completions API — accepted for CLI compatibility but ignored (prints a warning) |
 | `--json`               | off                        | Append JSON-only instruction to prompt          |
 | `--mode <name>`        | —                          | Preset: `product`, `video-script`, `style`      |
 

@@ -4,7 +4,7 @@
  * Gemini analysis via Irona's LLM gateway (direct completions).
  * Zero npm dependencies — uses native fetch.
  * Auth: IRONLABS_API_KEY → POST /api/v1/chat/completions (SSE)
- * Model: google/gemini-3.5-flash (provider/model format required by Irona's completions gateway)
+ * Model: google/gemini-3.5-flash (provider/model format required by IronLab's completions gateway)
  *
  * Usage:
  *   node gemini.mjs "Explain quantum computing"
@@ -19,7 +19,7 @@
  *   --file <path>         Attach a local file (image/video). Repeatable. ≤20MB inline.
  *   --resolution <level>  low|medium|high|ultra_high (hint only, for prompt context)
  *   --mode <name>         Preset: product, video-script, style
- *   --model <name>        Irona model name (default: google/gemini-3.5-flash)
+ *   --model <name>        IronLabs model name (default: google/gemini-3.5-flash)
  *   --temperature <n>     Temperature (default: 1.0)
  *   --max-tokens <n>      Max output tokens (default: 8192)
  *   --json                Request JSON-only response
@@ -100,7 +100,9 @@ function parseArgs(argv) {
   let mode = null;
   let model = "google/gemini-3.5-flash";
   let temperature = 1.0;
+  let temperatureExplicit = false;
   let maxTokens = 8192;
+  let maxTokensExplicit = false;
   let jsonMode = false;
   const textParts = [];
 
@@ -111,14 +113,14 @@ function parseArgs(argv) {
       case "--resolution":  resolution = argv[++i]; break;
       case "--mode":        mode = argv[++i]; break;
       case "--model":       model = argv[++i]; break;
-      case "--temperature": temperature = parseFloat(argv[++i]); break;
-      case "--max-tokens":  maxTokens = parseInt(argv[++i], 10); break;
+      case "--temperature": temperature = parseFloat(argv[++i]); temperatureExplicit = true; break;
+      case "--max-tokens":  maxTokens = parseInt(argv[++i], 10); maxTokensExplicit = true; break;
       case "--json":        jsonMode = true; break;
       default:              textParts.push(argv[i]);
     }
   }
 
-  return { files, dataUris, resolution, mode, model, temperature, maxTokens, jsonMode, prompt: textParts.join(" ") };
+  return { files, dataUris, resolution, mode, model, temperature, temperatureExplicit, maxTokens, maxTokensExplicit, jsonMode, prompt: textParts.join(" ") };
 }
 
 // Upload a large file to IronLabs CDN and return a public URL.
@@ -214,7 +216,11 @@ async function createConversation() {
 }
 
 // Call Irona completions endpoint and return the full response text
-async function callCompletions(messages, model, jsonMode) {
+// NOTE: the /chat/completions endpoint rejects unrecognized body keys — confirmed
+// live that "temperature", "max_tokens", and "response_format" each independently
+// cause a 400 "Unrecognized key(s)" error. Do not add them here; JSON mode is
+// enforced via a prompt instruction instead (see main()).
+async function callCompletions(messages, model) {
   const conversationId = await createConversation();
   const resp = await fetch(`${BASE_URL}/chat/completions`, {
     method: "POST",
@@ -227,7 +233,6 @@ async function callCompletions(messages, model, jsonMode) {
       messages,
       stream: true,
       conversationId,
-      ...(jsonMode ? { } : {}),
     }),
   });
 
@@ -276,7 +281,7 @@ Options:
   --data-uri <uri>      Inline base64 data URI (repeatable, e.g. "data:image/jpeg;base64,...")
   --resolution <level>  low / medium / high / ultra_high (hint only)
   --mode <name>         Preset: product, video-script, style
-  --model <name>        Irona model (default: google/gemini-3.5-flash)
+  --model <name>        IronLabs model (default: google/gemini-3.5-flash)
   --temperature <n>     Temperature (default: 1.0)
   --max-tokens <n>      Max output tokens (default: 8192)
   --json                Request JSON-only response
@@ -298,6 +303,22 @@ Examples:
     opts.prompt += "\nRespond with valid JSON only.";
   }
 
+  if (opts.resolution && opts.resolution !== "medium") {
+    const hint = `Analyze at ${opts.resolution} level of visual detail.`;
+    opts.prompt = opts.prompt ? `${opts.prompt}\n${hint}` : hint;
+  }
+
+  // The Irona /chat/completions endpoint rejects these as unrecognized body
+  // keys — there's no API-level equivalent, so best effort is a prompt
+  // instruction (--json already gets one above; temperature/max-tokens don't
+  // have one). Only warn when the user explicitly asked for them.
+  if (opts.temperatureExplicit) {
+    console.error(`Note: --temperature is not supported by this API and will be ignored.`);
+  }
+  if (opts.maxTokensExplicit) {
+    console.error(`Note: --max-tokens is not supported by this API and will be ignored.`);
+  }
+
   const contentParts = await buildContentParts(opts.files, opts.dataUris, opts.prompt);
 
   if (!contentParts.length) {
@@ -308,7 +329,7 @@ Examples:
   const messages = [{ role: "user", content: contentParts }];
 
   console.error(`Calling ${opts.model} via Irona gateway...`);
-  const text = await callCompletions(messages, opts.model, opts.jsonMode);
+  const text = await callCompletions(messages, opts.model);
 
   console.log(text);
 }

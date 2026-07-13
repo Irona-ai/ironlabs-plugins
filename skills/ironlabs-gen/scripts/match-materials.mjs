@@ -55,9 +55,13 @@ function score(material, shot) {
   return s;
 }
 
+// 'needs-frame-extraction' is a sentinel, not a valid --materials role — the CLI
+// only consumes ref_image/first_frame for video generation. A reference video
+// must be reduced to a still (e.g. via ffmpeg tail-frame extraction) before it
+// can anchor a shot.
 function suggestRole(material) {
   if (material.has_face) return 'asset';
-  if (material.type === 'reference-video') return 'ref_video';
+  if (material.type === 'reference-video') return 'needs-frame-extraction';
   return 'ref_image';
 }
 
@@ -112,14 +116,16 @@ for (const { shot_id, matches } of mapping) {
 
 console.error('\n  --materials flags per shot:\n');
 for (const { shot_id, matches } of mapping) {
-  if (matches.length === 0) {
+  const needsExtraction = matches.filter(m => m.suggestedRole === 'needs-frame-extraction');
+  const usable = matches.filter(m => m.suggestedRole === 'ref_image' || m.suggestedRole === 'first_frame');
+  if (usable.length === 0) {
     console.error(`  ${shot_id}: (no materials)`);
   } else {
-    const flag = matches
-      .filter(m => m.suggestedRole !== 'asset')
-      .map(m => `${m.localPath}:${m.suggestedRole}`)
-      .join(',');
+    const flag = usable.map(m => `${m.localPath}:${m.suggestedRole}`).join(',');
     console.error(`  ${shot_id}: --materials "${flag}"`);
+  }
+  for (const m of needsExtraction) {
+    console.error(`    note: ${m.file} is a reference video — extract a frame with ffmpeg first, then upload and use as first_frame`);
   }
 }
 

@@ -87,14 +87,21 @@ Maya comes home to find a mysterious package at her door. Inside is an antique p
 ## Phase 4 — Generation (Serial Chain)
 
 ```bash
+CLI=${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/ironlabs-cli.mjs
+
 # Check balance
 curl -s "${IRONLABS_BASE_URL:-https://www.chat.ironlabs.ai}/api/v1/chat/balance" \
   -H "Authorization: Bearer $IRONLABS_API_KEY" | jq '.balance'
 
-# S1 — character ref + scene ref (no ref_video for first segment)
-bash ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/scripts/video-gen.sh \
+# Upload character + scene refs (reused across segments)
+MAYA=$(node "$CLI" material upload assets/maya-ref.jpg | jq -r '.material.id')
+HALLWAY=$(node "$CLI" material upload assets/scene-hallway.jpg | jq -r '.material.id')
+LIVING=$(node "$CLI" material upload assets/scene-living.jpg | jq -r '.material.id')
+
+# S1 — character ref + scene ref (no first_frame for first segment)
+node "$CLI" task generate \
   --prompt "<S1 prompt>" --duration 8 --ratio 16:9 \
-  --materials "assets/maya-ref.jpg:ref_image,assets/scene-hallway.jpg:ref_image" \
+  --materials "${MAYA}:ref_image,${HALLWAY}:ref_image" \
   --tags "mystery,s1"
 # → rename output to generated/shots/S1.mp4
 
@@ -102,27 +109,30 @@ bash ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/scripts/video-gen.sh \
 ffmpeg -sseof -0.2 -i generated/shots/S1.mp4 -frames:v 1 -q:v 2 -y generated/keyframes/S1-end.jpg
 
 # S2
-bash ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/scripts/video-gen.sh \
+S1_END=$(node "$CLI" material upload generated/keyframes/S1-end.jpg | jq -r '.material.id')
+node "$CLI" task generate \
   --prompt "<S2 prompt>" --duration 13 --ratio 16:9 \
-  --materials "assets/maya-ref.jpg:ref_image,generated/keyframes/S1-end.jpg:first_frame,generated/shots/S1.mp4:ref_video,assets/scene-living.jpg:ref_image" \
+  --materials "${MAYA}:ref_image,${S1_END}:first_frame,${LIVING}:ref_image" \
   --tags "mystery,s2"
 # → rename output to generated/shots/S2.mp4
 
 ffmpeg -sseof -0.2 -i generated/shots/S2.mp4 -frames:v 1 -q:v 2 -y generated/keyframes/S2-end.jpg
 
 # S3
-bash ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/scripts/video-gen.sh \
+S2_END=$(node "$CLI" material upload generated/keyframes/S2-end.jpg | jq -r '.material.id')
+node "$CLI" task generate \
   --prompt "<S3 prompt>" --duration 12 --ratio 16:9 \
-  --materials "assets/maya-ref.jpg:ref_image,generated/keyframes/S2-end.jpg:first_frame,generated/shots/S2.mp4:ref_video,assets/scene-living.jpg:ref_image" \
+  --materials "${MAYA}:ref_image,${S2_END}:first_frame,${LIVING}:ref_image" \
   --tags "mystery,s3"
 # → rename output to generated/shots/S3.mp4
 
 ffmpeg -sseof -0.2 -i generated/shots/S3.mp4 -frames:v 1 -q:v 2 -y generated/keyframes/S3-end.jpg
 
 # S4
-bash ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/scripts/video-gen.sh \
+S3_END=$(node "$CLI" material upload generated/keyframes/S3-end.jpg | jq -r '.material.id')
+node "$CLI" task generate \
   --prompt "<S4 prompt>" --duration 12 --ratio 16:9 \
-  --materials "assets/maya-ref.jpg:ref_image,generated/keyframes/S3-end.jpg:first_frame,generated/shots/S3.mp4:ref_video,assets/scene-living.jpg:ref_image" \
+  --materials "${MAYA}:ref_image,${S3_END}:first_frame,${LIVING}:ref_image" \
   --tags "mystery,s4"
 # → rename output to generated/shots/S4.mp4
 ```

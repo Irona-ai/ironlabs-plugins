@@ -111,9 +111,12 @@ No music. No voiceover. No subtitles. No text. Diegetic audio only.
 When you attach reference images as `--materials`, describe them in the prompt so the model knows which image maps to which character or object.
 
 ```bash
-bash ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/scripts/video-gen.sh \
+CLI=${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/ironlabs-cli.mjs
+CHAR=$(node "$CLI" material upload assets/char-woman.jpg | jq -r '.material.id')
+SCENE=$(node "$CLI" material upload assets/scene-hallway.jpg | jq -r '.material.id')
+node "$CLI" task generate \
   --prompt "<prompt>" --duration 15 --ratio 16:9 \
-  --materials "assets/char-woman.jpg:ref_image,assets/scene-hallway.jpg:ref_image"
+  --materials "${CHAR}:ref_image,${SCENE}:ref_image"
 ```
 
 In the prompt, describe each material by its role:
@@ -146,21 +149,13 @@ Dimly lit apartment hallway, warm pendant light overhead...
 | **Match Cut** | Similar shape/color/motion links two different shots | Thematic connections |
 | **Emotional Shift** | Abrupt mood change (quiet→loud or loud→quiet) | Surprises, twists |
 
-### Serial continuity: choose based on scene goal
+### Serial continuity
 
-**Use tail-frame → next `first_frame` when:**
-- The next shot must open on an exact composition from the previous shot
+Use tail-frame → next `first_frame` when the next shot must open on an exact composition from the previous shot. This is the only supported continuity method — the CLI does not forward a previous shot's video as generation input.
 
 ```bash
 ffmpeg -sseof -0.2 -i generated/shots/S1.mp4 -frames:v 1 -q:v 2 -y generated/keyframes/S1-end.jpg
 # then pass: --materials "generated/keyframes/S1-end.jpg:first_frame"
-```
-
-**Use `ref_video` when:**
-- Motion/style transfer matters more than pinning the next shot's exact opening frame
-
-```bash
-# pass: --materials "generated/shots/S1.mp4:ref_video"
 ```
 
 ### Same style line everywhere

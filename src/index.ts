@@ -35,6 +35,11 @@ async function readStdinRaw(): Promise<string> {
 }
 
 // ── Previous statusLine integration ─────────────────────────────────────
+// Intentionally executes an arbitrary shell command: this file is only ever
+// written by /ironlabs:setup, copying the user's own pre-existing statusLine
+// command from ~/.claude/settings.json (a command Claude Code already runs
+// every session). Not attacker-controlled input — see commands/setup.md
+// Step 8, which also restricts this file to 0600.
 function runPreviousStatusLine(stdinData: string): string {
   try {
     const raw    = fs.readFileSync(PREVIOUS_STATUSLINE_FILE, 'utf-8')

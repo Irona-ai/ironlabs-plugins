@@ -16,11 +16,10 @@ Quick reference for creating and registering visual assets before writing prompt
 
 | Use case | Model | Why |
 |----------|-------|-----|
-| Character design sheet, scene refs, drafts | `fal-ai/flux/dev` | Balanced quality, fast iteration (default) |
-| Hero keyframe where fidelity matters | `fal-ai/flux-pro` | Highest fidelity + lighting quality |
-| Stylized / painterly illustration | `fal-ai/flux/dev` with style keywords | Add "painterly", "illustration style" to prompt |
+| Character design sheet, scene refs, drafts, hero keyframes | `nano-banana-2` | Default image model (`nano-banana-pro` currently maps to the same underlying model) |
+| Stylized / painterly illustration | `nano-banana-2` with style keywords | Add "painterly", "illustration style" to prompt |
 
-Override with `IRONLABS_IMAGE_MODEL` env var, or pass `--model` to `video-gen.sh --image`.
+Pass `--model` to `ironlabs-cli.mjs task generate`.
 
 ---
 
@@ -45,8 +44,8 @@ No text labels. No background elements.
 
 **Generate:**
 ```bash
-bash ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/scripts/video-gen.sh \
-  --image --ratio 16:9 \
+node ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/ironlabs-cli.mjs task generate \
+  --model nano-banana-2 --ratio 16:9 \
   --prompt "<character sheet prompt>" \
   --tags "<project>,char-<name>"
 # → saved locally, copy to assets/char-<name>.jpg
@@ -68,14 +67,14 @@ This analyzes files (tags, descriptions, face detection) and outputs `material-p
 
 ## Scene Reference (Recommended for Multi-Clip)
 
-Generate environment-only concept art for each segment to anchor lighting, color palette, and spatial layout. **Without scene refs, different segments will drift in environment appearance even with character refs and ref_video.**
+Generate environment-only concept art for each segment to anchor lighting, color palette, and spatial layout. **Without scene refs, different segments will drift in environment appearance even with character refs and first_frame continuity.**
 
 Scene images must NOT contain human faces.
 
 **Generate one scene ref per segment:**
 ```bash
-bash ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/scripts/video-gen.sh \
-  --image --ratio 16:9 \
+node ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/ironlabs-cli.mjs task generate \
+  --model nano-banana-2 --ratio 16:9 \
   --prompt "<scene description, environment only, no people. Include: location, time of day, lighting, color palette, key props, atmosphere. Photorealistic, cinematic composition.>" \
   --tags "<project>,scene-s<N>"
 # → copy output to assets/scene-s<N>.jpg
@@ -91,11 +90,11 @@ bash ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/scripts/video-gen.sh \
 
 ## Combining Anchors
 
-Character refs, `ref_video`, `first_frame`, and scene refs combine freely via `--materials`:
+Character refs, `first_frame`, and scene refs combine freely via `--materials`:
 
 ```bash
 # All anchors (character + continuity + environment)
---materials "assets/char.jpg:ref_image,generated/keyframes/S1-end.jpg:first_frame,generated/shots/S1.mp4:ref_video,assets/scene.jpg:ref_image"
+--materials "assets/char.jpg:ref_image,generated/keyframes/S1-end.jpg:first_frame,assets/scene.jpg:ref_image"
 
 # Character + environment only (no continuity needed — first segment)
 --materials "assets/char.jpg:ref_image,assets/scene.jpg:ref_image"
@@ -105,22 +104,23 @@ Character refs, `ref_video`, `first_frame`, and scene refs combine freely via `-
 ```
 
 **Example workflow for a 3-segment project:**
+(Upload each new file with `material upload` to get its ID before referencing it in `--materials` — see [Combining Anchors](#combining-anchors) above.)
 ```
 Prep:
   1. Generate character sheet → save to assets/char.jpg
   2. Generate scene concepts in parallel → save to assets/scene-s1.jpg, assets/scene-s2.jpg
 
 Generate (serial chain):
-  S1: video-gen.sh --materials "assets/char.jpg:ref_image,assets/scene-s1.jpg:ref_image"
+  S1: task generate --materials "char:ref_image,scene-s1:ref_image"
   → ffmpeg extract tail frame → generated/keyframes/S1-end.jpg
 
-  S2: video-gen.sh --materials "assets/char.jpg:ref_image,generated/keyframes/S1-end.jpg:first_frame,generated/shots/S1.mp4:ref_video,assets/scene-s2.jpg:ref_image"
+  S2: task generate --materials "char:ref_image,S1-end:first_frame,scene-s2:ref_image"
   → ffmpeg extract tail frame → generated/keyframes/S2-end.jpg
 
-  S3: video-gen.sh --materials "assets/char.jpg:ref_image,generated/keyframes/S2-end.jpg:first_frame,generated/shots/S2.mp4:ref_video,assets/scene-s2.jpg:ref_image"
+  S3: task generate --materials "char:ref_image,S2-end:first_frame,scene-s2:ref_image"
 ```
 
-S1 has no `ref_video` or `first_frame` — nothing to continue from. Add those anchors only from S2 onward.
+S1 has no `first_frame` — nothing to continue from. Add that anchor only from S2 onward.
 
 > Generations with multiple anchors take 8–12 min/segment.
 
@@ -162,15 +162,14 @@ bash ${CLAUDE_SKILL_DIR}/scripts/split-grid.sh storyboard.png output_dir/ 2 3
 Before writing prompts, build a mapping of all anchors for each shot:
 
 ```
-Shot  Character ref          Scene ref              Prev video / first_frame       --materials
-S1    assets/char.jpg        assets/scene-s1.jpg    (none)                         "assets/char.jpg:ref_image,assets/scene-s1.jpg:ref_image"
-S2    assets/char.jpg        assets/scene-s2.jpg    S1.mp4 + S1-end.jpg            "assets/char.jpg:ref_image,keyframes/S1-end.jpg:first_frame,shots/S1.mp4:ref_video,assets/scene-s2.jpg:ref_image"
-S3    (no characters)        assets/scene-s3.jpg    S2.mp4 + S2-end.jpg            "keyframes/S2-end.jpg:first_frame,shots/S2.mp4:ref_video,assets/scene-s3.jpg:ref_image"
+Shot  Character ref          Scene ref              Prev tail frame     --materials
+S1    assets/char.jpg        assets/scene-s1.jpg    (none)              "assets/char.jpg:ref_image,assets/scene-s1.jpg:ref_image"
+S2    assets/char.jpg        assets/scene-s2.jpg    S1-end.jpg          "assets/char.jpg:ref_image,keyframes/S1-end.jpg:first_frame,assets/scene-s2.jpg:ref_image"
+S3    (no characters)        assets/scene-s3.jpg    S2-end.jpg          "keyframes/S2-end.jpg:first_frame,assets/scene-s3.jpg:ref_image"
 ```
 
 **Rules:**
 - Scene/environment images (no faces) → `path:ref_image`
 - Previous segment tail frame → `path:first_frame`
-- Previous segment video → `path:ref_video`
 - Same location across segments → reuse the same scene ref file
-- S1 has no `ref_video` or `first_frame`
+- S1 has no `first_frame`

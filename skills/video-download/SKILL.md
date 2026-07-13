@@ -8,7 +8,7 @@ description: >
 allowed-tools: Bash
 metadata:
   author: ironlabs
-  version: 0.3.0
+  version: 0.1.0
   category: utility
   tags: [download, youtube, tiktok, douyin, yt-dlp, greenvideo]
 ---

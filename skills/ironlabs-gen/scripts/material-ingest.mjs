@@ -14,12 +14,12 @@
  *
  * Environment:
  *   IRONLABS_API_KEY   Required (for Gemini analysis via Irona gateway)
- *   IRONLABS_BASE_URL  Optional (default: https://www.chat.ironlabs.ai)
+ *   IRONLABS_BASE_URL  Optional (default: https://www.chat.ironlabs.ai/)
  */
 
 import fs from "fs";
 import path from "path";
-import { execSync } from "child_process";
+import { execFileSync } from "child_process";
 import { fileURLToPath } from "url";
 import { createHash } from "crypto";
 
@@ -92,11 +92,12 @@ Return ONLY valid JSON (no markdown fences) with these fields:
 - description: one sentence describing the content
 - has_face: boolean — true if a realistic human face is clearly visible
 - colors: array of dominant color names
-- suitable_roles: array from ["ref_image", "image1", "image2", "ref_video", "first_frame", "last_frame"]`;
+- suitable_roles: array from ["ref_image", "first_frame", "last_frame"] — for video files, leave empty (a raw video isn't a usable generation role; extract a still frame first)`;
 
   try {
-    const output = execSync(
-      `node "${GEMINI_PATH}" --file "${filePath}" --resolution ${resolution} --json '${prompt.replace(/'/g, "'\\''")}'`,
+    const output = execFileSync(
+      process.execPath,
+      [GEMINI_PATH, "--file", filePath, "--resolution", resolution, "--json", prompt],
       { encoding: "utf-8", timeout: 120000 }
     );
     const jsonMatch = output.match(/\{[\s\S]*\}/);
@@ -159,7 +160,7 @@ Options:
         description: "",
         has_face: false,
         colors: [],
-        suitable_roles: r.type === "video" ? ["ref_video"] : ["ref_image", "image1"],
+        suitable_roles: r.type === "video" ? [] : ["ref_image"],
       });
     }
   } else {
@@ -191,7 +192,7 @@ Options:
           description: "",
           has_face: false,
           colors: [],
-          suitable_roles: r.type === "video" ? ["ref_video"] : ["ref_image", "image1"],
+          suitable_roles: r.type === "video" ? [] : ["ref_image"],
         });
       }
     }

@@ -35,6 +35,18 @@ const IRONLABS_DIR = join(os.homedir(), ".ironlabs");
 const TASK_DIR = join(IRONLABS_DIR, "tasks");
 const MATERIAL_DIR = join(IRONLABS_DIR, "materials");
 
+// Monotonic ID generator: Date.now() alone collides when multiple
+// tasks/materials are created within the same millisecond (e.g. Promise.all
+// batches), silently overwriting each other's stored files. process.pid is
+// folded into the starting offset so separate CLI processes launched in the
+// same millisecond don't both start counting from 0. Stays within Date.now()
+// * 1000's headroom under Number.MAX_SAFE_INTEGER.
+const pidSalt = process.pid % 1000;
+let idSequence = 0;
+function nextId() {
+  return Date.now() * 1000 + ((pidSalt + idSequence++) % 1000);
+}
+
 function writeTask(id, data) {
   try {
     mkdirSync(TASK_DIR, { recursive: true });
@@ -46,15 +58,21 @@ function readTask(id) {
 }
 function listLocalTasks(params = {}) {
   try {
-    return readdirSync(TASK_DIR)
+    let tasks = readdirSync(TASK_DIR)
       .filter(f => f.endsWith(".json"))
-      .slice(0, params.limit || 50)
       .map(f => {
         try {
           const d = JSON.parse(readFileSync(join(TASK_DIR, f), "utf-8"));
-          return { id: d.taskId, status: d.status, model: d.model || "unknown", prompt: d.prompt || "", tags: JSON.stringify(d.tags || []) };
+          return { id: d.taskId, status: d.status, model: d.model || "unknown", prompt: d.prompt || "", tags: JSON.stringify(d.tags || []), _rawTags: d.tags || [] };
         } catch { return null; }
-      }).filter(Boolean);
+      })
+      .filter(Boolean);
+    if (params.status) tasks = tasks.filter(t => t.status === params.status);
+    if (params.tag) tasks = tasks.filter(t => t._rawTags.includes(params.tag));
+    tasks.sort((a, b) => b.id - a.id); // most recent first (id is a monotonic timestamp)
+    const offset = params.offset || 0;
+    const limit = params.limit || 50;
+    return tasks.slice(offset, offset + limit).map(({ _rawTags, ...t }) => t);
   } catch { return []; }
 }
 function writeMaterial(id, data) {
@@ -68,16 +86,20 @@ function readMaterial(id) {
 }
 function listLocalMaterials(params = {}) {
   try {
-    return readdirSync(MATERIAL_DIR)
+    let materials = readdirSync(MATERIAL_DIR)
       .filter(f => f.endsWith(".json"))
-      .slice(0, params.limit || 50)
       .map(f => {
         try {
           const d = JSON.parse(readFileSync(join(MATERIAL_DIR, f), "utf-8"));
           if (params.type && d.type !== params.type) return null;
           return { id: d.id, type: d.type || "image", name: d.name || f };
         } catch { return null; }
-      }).filter(Boolean);
+      })
+      .filter(Boolean);
+    materials.sort((a, b) => b.id - a.id); // most recent first (id is a monotonic timestamp)
+    const offset = params.offset || 0;
+    const limit = params.limit || 50;
+    return materials.slice(offset, offset + limit);
   } catch { return []; }
 }
 
@@ -172,25 +194,40 @@ var IronlabsClient = class {
   // ---- Credit ----
   async getMe() {
     const data = await this.request("GET", "/chat/balance");
-    const balance = data.data?.totalBalance ?? data.balance;
-    if (typeof balance !== "number") {
-      throw new ApiError(500, data, "Balance response did not include a totalBalance value");
-    }
+    if (raw == null) {
+  throw new ApiError(500, data, "Balance response did not include a totalBalance value");
+}
+
+const dollars = typeof raw === "string" ? parseFloat(raw) : raw;
+
+if (typeof dollars !== "number" || Number.isNaN(dollars)) {
+  throw new ApiError(500, data, "Balance response did not include a valid totalBalance value");
+}
+
+// totalBalance is in dollars; normalize to cents.
+const balance = Math.round(dollars * 100);
     return { user: { id: "ironlabs-user", balance }, balance };
   }
   async estimateCost(params = {}) {
     const isImage = this.isImageModel(params.model);
-    const model = this.mapModel(params.model, isImage);
+    // Only fall back to a default model when none was given — an unrecognized
+    // short alias should surface as "no pricing data", not silently reprice
+    // against the default model.
+    let model;
+    if (!params.model) {
+      model = this.mapModel(params.model, isImage);
+    } else if (params.model.includes("/")) {
+      model = params.model;
+    } else {
+      model = (isImage ? IMAGE_MODEL_MAP : VIDEO_MODEL_MAP)[params.model];
+      if (!model) return { credits: 0, note: `No pricing data for ${params.model}` };
+    }
     const pricing = OR_PRICING[model];
     if (!pricing) return { credits: 0, note: `No pricing data for ${model || "unknown model"}` };
     const usd = pricing.type === "video"
       ? (parseInt(params.duration) || 5) * pricing.perSecond
       : pricing.flat;
     return { credits: Math.ceil(usd * 100), usd: parseFloat(usd.toFixed(4)), model };
-  }
-  async getCreditHistory(limit = 50) {
-    const data = await this.request("GET", `/chat/transactions?limit=${limit}`);
-    return { transactions: data.data?.transactions ?? [] };
   }
   // ---- Task ----
   isImageModel(model) {
@@ -217,7 +254,8 @@ var IronlabsClient = class {
       }
     }
     const model = this.mapModel(params.model, isImage);
-    const taskId = Date.now();
+    const taskId = nextId();
+    const { credits: estimatedCredit } = await this.estimateCost({ model: params.model, duration: params.duration });
     if (isImage) {
       // image_generate via openrouter connector — returns a chat-completion with image modality
       const orArgs = {
@@ -228,6 +266,9 @@ var IronlabsClient = class {
       // image-to-image: pass a reference image if provided
       const imageRef = params.materials?.find(m => m.role === "ref_image" || m.role === "first_frame");
       if (imageRef?._dataUri) orArgs.image_url = imageRef._dataUri;
+      if (params.resolution) {
+        console.error(`Note: --resolution has no effect on image generation — image size is controlled by --ratio. Ignoring "${params.resolution}".`);
+      }
       console.log(`Generating image via OpenRouter connector (${model})...`);
       const orResult = await this.mcpCall("openrouter", "image_generate", orArgs);
       // Extract image URL from chat-completion response (modalities: image+text)
@@ -237,32 +278,36 @@ var IronlabsClient = class {
         const imgPart = choice.content.find(p => p.type === "image_url");
         imageUrl = imgPart?.image_url?.url ?? null;
       }
+      if (!imageUrl) throw new ApiError(500, orResult, "OpenRouter connector did not return an image");
       const stored = {
         taskId, status: "completed",
         model, prompt: params.prompt,
         tags: params.tags || [],
-        videoUrl: null, imageUrl, coverUrl: null, orResult,
+        videoUrl: null, imageUrl, orResult,
       };
       writeTask(taskId, stored);
-      return { task: { id: taskId, status: "completed", estimatedCredit: 0 } };
+      return { task: { id: taskId, status: "completed", estimatedCredit } };
     } else {
       // video_submit via openrouter connector — async, returns { id, polling_url, status }
+      // image_url is optional: omit it for pure text-to-video.
       const firstFrame = params.materials?.find(m => m.role === "first_frame" || m.role === "ref_image");
       const lastFrame  = params.materials?.find(m => m.role === "last_frame");
-      if (!firstFrame?._dataUri) {
-        throw new ApiError(400, {}, "Video generation requires a reference image (first_frame or ref_image material). Attach one with --materials.");
-      }
       const orArgs = {
         prompt: params.prompt,
         model,
-        image_url: firstFrame._dataUri,
       };
+      if (firstFrame?._dataUri) orArgs.image_url = firstFrame._dataUri;
       if (lastFrame?._dataUri) orArgs.last_image_url = lastFrame._dataUri;
       if (params.duration) orArgs.duration = parseInt(params.duration);
       if (params.ratio)    orArgs.aspect_ratio = params.ratio;
       if (params.resolution) {
+        // Video models top out at 1080p — "4k" is accepted for convenience but downgraded.
         const resMap = { "1k": "720p", "2k": "1080p", "4k": "1080p" };
-        orArgs.resolution = resMap[params.resolution] || params.resolution;
+        const resolved = resMap[params.resolution] || params.resolution;
+        if (params.resolution === "4k") {
+          console.error(`Note: video models support up to 1080p — "4k" will render at 1080p, not 4k.`);
+        }
+        orArgs.resolution = resolved;
       }
       console.log(`Submitting video via OpenRouter connector (${model})...`);
       const submitResult = await this.mcpCall("openrouter", "video_submit", orArgs);
@@ -272,11 +317,11 @@ var IronlabsClient = class {
         taskId, status: "pending",
         model, prompt: params.prompt,
         tags: params.tags || [],
-        videoUrl: null, imageUrl: null, coverUrl: null,
+        videoUrl: null, imageUrl: null,
         _openrouterId: generationId,
       };
       writeTask(taskId, stored);
-      return { task: { id: taskId, status: "pending", estimatedCredit: 0 } };
+      return { task: { id: taskId, status: "pending", estimatedCredit } };
     }
   }
   async listTasks(params = {}) {
@@ -325,13 +370,9 @@ var IronlabsClient = class {
     }
     throw new ApiError(408, {}, `Video generation timed out after ${maxWaitMs / 1000}s`);
   }
-  async generate(params, options) {
-    const { task } = await this.createTask(params);
-    return this.waitForTask(task.id, options);
-  }
   // ---- Material ----
   async uploadMaterial(file, filename, type = "image") {
-    const matId = Date.now();
+    const matId = nextId();
     const ext = filename.split(".").pop()?.toLowerCase() || "jpg";
     const mimeType = type === "video" ? "video/mp4"
       : ext === "png" ? "image/png"
@@ -386,7 +427,7 @@ var IronlabsClient = class {
   }
   async importCharacters(file, filename) {
     if (!file || !filename) throw new ApiError(400, {}, "Usage: ironlabs character create <image-file>");
-    const matId = Date.now();
+    const matId = nextId();
     const ext = filename.split(".").pop()?.toLowerCase() || "jpg";
     const mimeType = ext === "png" ? "image/png" : ext === "webp" ? "image/webp" : "image/jpeg";
     const dataUri = `data:${mimeType};base64,${Buffer.from(file).toString("base64")}`;
@@ -400,7 +441,7 @@ var IronlabsClient = class {
   // ---- Asset (stored locally with key "asset-<id>") ----
   async createAsset(file, filename, type = "image") {
     if (!file || !filename) throw new ApiError(400, {}, "Usage: ironlabs asset create <file>");
-    const matId = Date.now();
+    const matId = nextId();
     const ext = filename.split(".").pop()?.toLowerCase() || "jpg";
     const videoExts = ["mp4", "mov", "webm", "avi", "mkv"];
     const assetType = (type === "video" || videoExts.includes(ext)) ? "video" : "image";
@@ -433,7 +474,7 @@ var IronlabsClient = class {
     return {};
   }
   async waitForAsset(id) { return this.getAsset(id); }
-  async createAssetGroup() { return { group: { id: Date.now(), name: "default" } }; }
+  async createAssetGroup() { return { group: { id: nextId(), name: "default" } }; }
   async listAssetGroups() { return []; }
 };
 
@@ -521,7 +562,7 @@ Domains:
   material    Upload and manage materials
   asset       Save and manage asset files (image/video) for generation anchoring
   character   Save and manage character reference images for identity consistency
-  credit      Check balance and transaction history
+  credit      Check balance and estimate task cost
 
 Environment:
   IRONLABS_API_KEY   IronLabs API key — all requests (balance, generation, uploads)
@@ -550,7 +591,7 @@ Commands:
   result <id>                 Get task result
   wait <id>                   Wait for task (already done — returns cached result)
   cancel <id>                 Cancel a task (no-op for synchronous tasks)
-  chain <id>                  Download completed task result → upload as material (for ref_video chaining)
+  chain <id>                  Download completed task result → upload as material (e.g. for first_frame chaining)
   tags                        List all your tags
   tag <id> --tags a,b,c       Update tags on a task
 
@@ -589,6 +630,7 @@ Commands:
 Options for list:
   --type <image|video>        Filter by type
   --limit <n>                 Max results (default: 20)
+  --offset <n>                Skip first n results (default: 0)
 
 Options for upload:
   --type <image|video>        Override auto-detected type
@@ -639,12 +681,11 @@ Examples:
   ironlabs asset delete 1234567890
 `.trim();
 var HELP_CREDIT = `
-ironlabs credit — Balance and transactions
+ironlabs credit — Balance and cost estimation
 
 Commands:
   me                          Show current user balance
   estimate                    Estimate task cost by model and duration
-  history                     Show credit transaction history (not available)
 
 Options for estimate:
   --model <name>              Model alias or OpenRouter model path (default: ironlabs-2.0)
@@ -736,7 +777,7 @@ async function taskCancel(client, positional) {
 async function taskChain(client, positional) {
   const id = parseInt(positional[0]);
   if (!id) {
-    console.error("Error: task ID required.\nUsage: ironlabs task chain <id>\n\nDownloads completed task result and uploads as material for ref_video chaining.");
+    console.error("Error: task ID required.\nUsage: ironlabs task chain <id>\n\nDownloads a completed task result and re-uploads it as a material (e.g. for extracting a tail frame to use as first_frame in the next segment).");
     process.exit(1);
   }
   console.log(`Getting result for task #${id}...`);
@@ -770,7 +811,11 @@ async function taskChain(client, positional) {
   const data = await client.uploadMaterial(buffer, filename, type);
   const matId = data.material?.id || data.id;
   console.log(`\nMaterial #${matId} ready.`);
-  console.log(`Use as: --materials "${matId}:ref_${type}"`);
+  if (isVideo) {
+    console.log(`Note: video isn't a supported --materials role. Extract a tail frame with ffmpeg and upload that instead for first_frame continuity.`);
+  } else {
+    console.log(`Use as: --materials "${matId}:ref_image"`);
+  }
   json(data);
 }
 async function taskTags(client) {
@@ -789,6 +834,7 @@ async function materialList(client, flags) {
   const data = await client.listMaterials({
     type: flags.type,
     limit: flags.limit ? parseInt(flags.limit) : 20,
+    offset: flags.offset ? parseInt(flags.offset) : 0,
   });
   console.log(`Found ${data.materials.length} material(s):\n`);
   for (const m of data.materials) {
@@ -901,19 +947,6 @@ async function assetDelete(client, positional) {
 async function creditMe(client) {
   json(await client.getMe());
 }
-async function creditEstimate(client, flags) {
-  json(await client.estimateCost({ model: flags.model, duration: flags.duration }));
-}
-async function creditHistory(client, flags) {
-  const data = await client.getCreditHistory(flags.limit ? parseInt(flags.limit) : 50);
-  console.log(`Found ${data.transactions.length} transaction(s):\n`);
-  for (const t of data.transactions) {
-    const sign = t.type === "credit" ? "+" : "-";
-    const amt = (Number(t.amount) / 100).toFixed(2);
-    const date = new Date(t.createdAt).toLocaleDateString();
-    console.log(`  ${date}  ${sign}$${amt}  ${t.reason}`);
-  }
-}
 function buildCreateParams(flags) {
   const params = { prompt: flags.prompt };
   if (flags.model) params.model = flags.model;
@@ -931,7 +964,7 @@ function buildCreateParams(flags) {
         allMaterials.push({ user_asset_id: assetId, role });
       } else {
         const [id, role] = parts;
-        allMaterials.push({ id: parseInt(id), role: role || "ref_video" });
+        allMaterials.push({ id: parseInt(id), role: role || "ref_image" });
       }
     }
   }
@@ -950,9 +983,7 @@ function buildCreateParams(flags) {
 function printResult(result) {
   console.log(`Task #${result.taskId}  ${result.status}`);
   if (result.videoUrl) console.log(`  Video: ${result.videoUrl}`);
-  if (result.coverUrl) console.log(`  Cover: ${result.coverUrl}`);
   if (result.imageUrl) console.log(`  Image: ${result.imageUrl}`);
-  if (result.warning) console.log(`  Warning: ${result.warning}`);
   json(result);
 }
 var DOMAIN_HELP = {
@@ -982,18 +1013,8 @@ async function main() {
   }
   // credit estimate is pure local math — no API key needed
   if (domain === "credit" && action === "estimate") {
-    const isImage = IMAGE_MODELS.has(flags.model || "");
-    const model = (isImage ? IMAGE_MODEL_MAP : VIDEO_MODEL_MAP)[flags.model] || flags.model ||
-      (isImage ? "black-forest-labs/flux-dev" : "bytedance/seedance-1.5");
-    const pricing = OR_PRICING[model];
-    if (!pricing) {
-      json({ credits: 0, note: `No pricing data for ${model || "unknown model"}` });
-    } else {
-      const usd = pricing.type === "video"
-        ? (parseInt(flags.duration) || 5) * pricing.perSecond
-        : pricing.flat;
-      json({ credits: Math.ceil(usd * 100), usd: parseFloat(usd.toFixed(4)), model });
-    }
+    const client = createClient(flags["base-url"], true);
+    json(await client.estimateCost({ model: flags.model, duration: flags.duration }));
     return;
   }
   const baseUrlOverride = flags["base-url"] || null;
@@ -1060,9 +1081,8 @@ async function main() {
         break;
       case "credit":
         switch (action) {
-          case "me":       await creditMe(client); break;
-          case "estimate": await creditEstimate(client, flags); break;
-          case "history":  await creditHistory(client, flags); break;
+          case "me": await creditMe(client); break;
+          // "estimate" is handled earlier (before client/auth setup) since it's pure local math.
           default:
             console.error(`Unknown credit action: ${action}\n`);
             console.log(HELP_CREDIT);
