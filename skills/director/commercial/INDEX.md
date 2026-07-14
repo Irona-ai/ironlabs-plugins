@@ -245,7 +245,7 @@ node "$CLI" credit me
 ## Important Notes
 
 1. **Language**: Draft in user's language. Translate to English before the API call — except Scenario D (dialogue prompts stay in user's language for lip-sync)
-2. **Asset limits**: no documented hard cap on `ref_image` count, but only the first is guaranteed delivered — see Asset Reference Rules above
+2. **Asset limits**: no documented hard cap on `ref_image` count — any number combine freely on the default model (`ironlabs-2.0` and other OpenRouter models), each bound via `@Image1`, `@Image2`, ... — see Asset Reference Rules above
 3. **Duration**: 5–15s per segment; use tail-frame → `first_frame` chaining for longer videos
 4. **Face privacy**: default to AI-generated portraits or text-only descriptions for any character/presenter face — don't rely on asset registration as a workaround
 5. **Aspect ratio**: Once confirmed, all reference images should match the same ratio

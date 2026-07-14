@@ -121,7 +121,7 @@ Auth: `Authorization: Bearer <sandbox_token>` (NOT the API key — use token fro
 ```
 `image_url` (first frame) is optional — omit it for pure text-to-video. Include it for image-to-video (first-frame/ref_image material).
 `last_image_url` is optional, but **model-gated**: irona-chat's `video_submit` now checks `supportsLastFrame` per model before forwarding it — `x-ai/grok-imagine-video` (the default) doesn't support it and the connector throws a clear error rather than silently sending an invalid combination to OpenRouter. `kwaivgi/kling-v3.0-pro` and `bytedance/seedance-2.0` do support it.
-`reference_image_urls` — **confirmed working, not speculative.** Maps to OpenRouter's real `input_references` field (documented at [openrouter.ai/docs/api-reference/video-generation/create-videos](https://openrouter.ai/docs/api/api-reference/video-generation/create-videos)), capped per-model server-side via `maxInputReferences`. `ironlabs-cli.mjs` sends every attached `ref_image` material here, in upload order — bind to each with `@Image1`, `@Image2`, ... in the prompt.
+`reference_image_urls` — **confirmed working, not speculative.** Maps to OpenRouter's real `input_references` field (documented at [openrouter.ai/docs/api/api-reference/video-generation/create-videos](https://openrouter.ai/docs/api/api-reference/video-generation/create-videos)), capped per-model server-side via `maxInputReferences`. `ironlabs-cli.mjs` sends every attached `ref_image` material here, in upload order — bind to each with `@Image1`, `@Image2`, ... in the prompt.
 Response: `{ id, polling_url, status }`.
 
 **Still no `video_url` field.** `video_submit` has no way to accept an existing video as input — that capability doesn't exist on OpenRouter's video API at all (checked OpenRouter's own docs directly: text-to-video, image-to-video, and reference-to-video are the only three modes it documents, for any model, including Veo 3.1 which is otherwise available through OpenRouter). See the Fal Direct section below for how real video-to-video continuation works instead.
@@ -242,6 +242,8 @@ Both calls are **synchronous** — the response is the finished result, not a jo
 | `veo-3.1-extend-fast` | `fal-ai/veo3.1/fast/extend-video` | fal direct (sync) | Same, faster/cheaper tier |
 
 Pass any `provider/model` path directly to skip aliasing (not applicable to the three fal-direct aliases, which aren't OpenRouter paths).
+
+**Cost note**: none of the three fal-direct aliases have pricing data in `IMAGE_MODEL_MAP`/`VIDEO_MODEL_MAP`, so `credit estimate` and the printed task cost both read `0 credits` / "No pricing data" for them — that's a missing-data gap, not an indication the call is free.
 
 ## Material Roles
 
