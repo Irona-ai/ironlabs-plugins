@@ -16,10 +16,12 @@ Quick reference for creating and registering visual assets before writing prompt
 
 | Use case | Model | Why |
 |----------|-------|-----|
-| Character design sheet, scene refs, drafts, hero keyframes | `nano-banana-2` | Default image model (`nano-banana-pro` currently maps to the same underlying model) |
-| Stylized / painterly illustration | `nano-banana-2` with style keywords | Add "painterly", "illustration style" to prompt |
+| Character design sheet, scene refs, drafts, hero keyframes | `nano-banana-2` | Default image model |
+| Hero / final keyframe where fidelity matters | `nano-banana-pro` | Same underlying model as `nano-banana-2` today — alias kept for when it diverges |
+| Poster / title card / anything with readable text or logos | `gpt-image-2` | Alias intended for stronger typography — currently the same underlying model too |
+| Stylized / painterly illustration | `midjourney-v7`, or `nano-banana-2` with style keywords | Alias intended for stronger stylization — currently the same underlying model; "painterly", "illustration style" in-prompt works either way |
 
-Pass `--model` to `ironlabs-cli.mjs task generate`.
+All four aliases currently map to the same underlying model (`google/gemini-3.1-flash-image-preview`) per `ironlabs-gen/references/api-endpoints.md` — pick by intent now so prompts don't need rewriting if the aliases diverge later. Pass `--model` to `ironlabs-cli.mjs task generate`.
 
 ---
 
@@ -50,6 +52,8 @@ node ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/ironlabs-cli.mjs task generate \
   --tags "<project>,char-<name>"
 # → saved locally, copy to assets/char-<name>.jpg
 ```
+
+If this character will be reused across many segments or future projects, register the sheet once instead of re-uploading it each session — see the "Reusing a character/product across many generations" note in `SKILL.md`'s Anchoring Strategy section (`asset create` / `character create`).
 
 ---
 
@@ -154,6 +158,12 @@ convert storyboard.png -crop 3x2@ +repage +adjoin panel_%d.png
 # Or use the included script:
 bash ${CLAUDE_SKILL_DIR}/scripts/split-grid.sh storyboard.png output_dir/ 2 3
 ```
+
+**Why one image beats many:** independent per-segment generations start from different random seeds, causing drift in face shape, color palette, and rendering style even with the same character description. A single grid generation forces consistency across panels — split it after the fact rather than generating each panel separately.
+
+**Privacy note**: grid panels with close-up faces are still subject to the same privacy detection as any other face image (see `SKILL.md` Hard Rules) once split and passed as `ref_image`. Design grids with environment-focused wide shots and small figures where the face isn't the reference target; keep dedicated close-up character sheets for cases where face consistency specifically matters.
+
+**Generation order**: generate character design sheets first and review them, then reference the locked appearance when writing the storyboard grid prompt. The grid comes out more consistent when the character look is already settled.
 
 ---
 

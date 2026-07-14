@@ -106,6 +106,19 @@ No music. No voiceover. No subtitles. No text. Diegetic audio only.
 
 ---
 
+## Dialogue Format
+
+When a character speaks, use the forced lip-sync format — this is what `video-capabilities.md` refers to as the "exact word-for-word embedding format":
+
+```
+Spoken dialogue (say EXACTLY, word-for-word): "Stop scrolling - I threw out all my gym equipment for these three bands."
+Mouth clearly visible when speaking, lip-sync aligned.
+```
+
+Follow each dialogue line with the lip-sync instruction. Keep dialogue lines under 15 words each, max 3-4 lines per 15s segment. Remember: prompts containing dialogue stay in the user's language throughout (see the Hard Rules in `SKILL.md`) — translating dialogue to English produces English voiceover, not translated voiceover.
+
+---
+
 ## Referencing Materials in Prompts
 
 When you attach reference images as `--materials`, describe them in the prompt so the model knows which image maps to which character or object.
@@ -128,6 +141,25 @@ Female, identity lock. Utility vest, clipboard in hand...
 [SCENE] — see attached scene reference image.
 Dimly lit apartment hallway, warm pendant light overhead...
 ```
+
+This plain-language description works on every model and is always safe to use.
+
+### `@Image1` / `@Image2` binding — works on the default model, no switch needed
+
+This is a real, confirmed feature on `ironlabs-2.0` (and every other OpenRouter video model) directly — attaching 2+ `ref_image` materials now genuinely reaches the model via OpenRouter's `input_references` field, with `@Image1`, `@Image2`, ... binding to upload order:
+
+```bash
+CLI=${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/ironlabs-cli.mjs
+CHAR=$(node "$CLI" material upload assets/char-woman.jpg | jq -r '.material.id')
+SCENE=$(node "$CLI" material upload assets/scene-hallway.jpg | jq -r '.material.id')
+node "$CLI" task generate \
+  --prompt "@Image1 reaches into the case and pulls out the thermos. @Image2 (the hallway) is visible behind her." \
+  --materials "${CHAR}:ref_image,${SCENE}:ref_image"
+```
+
+Still keep the full `[CHARACTER]` / `[SCENE]` plain-language blocks in the prompt alongside the `@ImageN` tokens; the binding supplements the description, it doesn't replace it.
+
+An alternative path, `--model grok-multiref`, calls the same underlying model (`xai/grok-imagine-video/reference-to-video`) directly via fal.ai instead of through OpenRouter, and runs synchronously (no `task wait` needed — the result is ready as soon as `task create`/`task generate` returns). Reach for it only if you specifically want that synchronous behavior; otherwise the default model above is simpler and async like your other generations.
 
 ---
 
@@ -191,13 +223,37 @@ character position, prop state, emotional state, lighting state].
 
 ---
 
+## Adaptation & Source Material
+
+When adapting existing material (novels, screenplays, manga):
+
+**Prioritize scenes that are:**
+- Visually striking - strong imagery the AI model can render well
+- Emotionally intense - peaks in the character's arc
+- Self-contained - comprehensible without extensive context
+- Action-rich - physical movement, not just dialogue/internal monologue
+
+**Deprioritize:**
+- Exposition-heavy scenes (hard to visualize)
+- Scenes requiring more than 2 characters simultaneously (AI struggles with crowds)
+- Scenes that only make sense with full source-material context
+
+**Condensation techniques:**
+- Merge two scenes that serve similar purposes into one segment
+- Cut transitional scenes - jump straight to the next emotional beat
+- Externalize internal monologue - show the emotion through action/expression
+- Simplify multi-character scenes to focus on 1-2 key characters
+
+---
+
 ## What NOT to Do
 
 - **Don't write generic actions**: "She interacts with the object" → write exactly what she does with her hands
 - **Don't summarize**: "They argue about whose fault it is" → write the specific pointing gestures, clipboard grabs, stepping patterns
-- **Don't front-load camera instructions**: action first, camera second
+- **Don't front-load camera instructions**: action first, camera second. The model needs to understand the scene before knowing how to film it
+- **Don't use energy numbers**: "⚡ Energy: 7" means nothing to the model. Write the actual pacing - fast cuts, slow holds, motion blur
 - **Don't skip sound design**: every silent prompt is a wasted opportunity to improve the visual output
-- **Don't put BGM instructions for narrative videos**: BGM instructions are for e-commerce/product videos only
+- **Don't put BGM instructions for narrative videos**: if the video should have diegetic audio only, say so. BGM instructions are for e-commerce/product videos only
 
 ---
 

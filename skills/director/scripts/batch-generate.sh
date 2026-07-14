@@ -84,7 +84,8 @@ for i in $(seq 0 $((SHOT_COUNT - 1))); do
     CLI_ARGS+=(--model "$MODEL")
   fi
 
-  # Create task (synchronous in IronLabs — returns immediately with result)
+  # Create task. Images complete synchronously; videos return status "pending"
+  # and need an explicit wait below.
   TASK_JSON=$($CLI "${CLI_ARGS[@]}" 2>/dev/null) || {
     echo "[FAILED] $SHOT_ID — CLI error"
     FAILED=$((FAILED + 1))
@@ -104,13 +105,23 @@ for i in $(seq 0 $((SHOT_COUNT - 1))); do
     break
   fi
 
-  # Get result (task is already done — just reads from local cache)
-  RESULT_JSON=$($CLI task result "$TASK_ID" 2>/dev/null) || {
-    echo "[FAILED] $SHOT_ID — Could not get result"
-    FAILED=$((FAILED + 1))
-    RESULTS+=("$SHOT_ID|FAILED|$TASK_ID|no result")
-    continue
-  }
+  TASK_STATUS=$(echo "$TASK_JSON" | jq -r '.task.status // empty' 2>/dev/null)
+  if [[ "$TASK_STATUS" == "completed" ]]; then
+    RESULT_JSON=$($CLI task result "$TASK_ID" 2>/dev/null) || {
+      echo "[FAILED] $SHOT_ID — Could not get result"
+      FAILED=$((FAILED + 1))
+      RESULTS+=("$SHOT_ID|FAILED|$TASK_ID|no result")
+      continue
+    }
+  else
+    # Video task: still pending — poll until it finishes.
+    RESULT_JSON=$($CLI task wait "$TASK_ID" --timeout "$TIMEOUT" 2>/dev/null) || {
+      echo "[FAILED] $SHOT_ID — Timed out or failed while waiting"
+      FAILED=$((FAILED + 1))
+      RESULTS+=("$SHOT_ID|FAILED|$TASK_ID|wait failed")
+      continue
+    }
+  fi
 
   VIDEO_URL=$(echo "$RESULT_JSON" | jq -r '.videoUrl // .imageUrl // "—"' 2>/dev/null || echo "—")
 

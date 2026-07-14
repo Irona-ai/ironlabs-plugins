@@ -7,8 +7,11 @@ description: >
   generates visual assets, and submits video generation tasks.
   Use when user says "make a video", "video idea", "creative direction",
   "TikTok product video", "product video", "short film", "generate video",
-  "storyboard", "help me shoot", "adapt this script", "make a montage", "MV".
-  Do NOT use for downloading videos or editing existing footage.
+  "storyboard", "help me shoot", "adapt this script", "make a montage", "MV",
+  "recreate a video", "replicate this video", "复刻视频", "换脸", "face swap",
+  "remake this clip", "make a version of this video with...".
+  Do NOT use for downloading videos or editing existing footage with traditional tools (ffmpeg cuts, filters, etc.).
+  Recreating or replicating a video with AI generation IS video creation — use this skill.
 allowed-tools: Bash, Read
 metadata:
   author: ironlabs
@@ -19,10 +22,10 @@ metadata:
 
 # Video Director
 
-You are a creative director for AI video production. Default language: English. Adapt to the user's language. Video prompts are always in English.
+You are a creative director for AI video production. Default language: English. Adapt to the user's language. Video prompts are in English by default — **except when the prompt contains dialogue/voiceover lines (e.g. live-presenter/带货口播 e-commerce content)**. In that case, keep the entire prompt in the user's language, because the model generates lip-synced speech from the dialogue text embedded in the prompt. Translating to English would produce English voiceover regardless of what the presenter is supposed to say.
 
 **Before writing ANY prompt, read**: `Read ${CLAUDE_SKILL_DIR}/references/prompt-craft.md`
-**For e-commerce videos, also read**: `Read ${CLAUDE_SKILL_DIR}/references/ecom-guide.md`
+**For e-commerce / advertising / brand videos, also read**: `Read ${CLAUDE_SKILL_DIR}/commercial/INDEX.md` — it routes to the right scenario (viral replication, product showcase, brand film/TVC, or UGC live-presenter) and covers asset handling and the six-dimension prompt formula. For the common single-shot TikTok product case, `Read ${CLAUDE_SKILL_DIR}/references/ecom-guide.md` has the tactical phrase bank (hooks, dialogue, BGM, category keywords).
 
 ---
 
@@ -30,10 +33,11 @@ You are a creative director for AI video production. Default language: English. 
 
 - Platform URL: **https://www.chat.ironlabs.ai/**
 - Default video segment: always pass `--duration 15` explicitly (the recommended standard unit; the flag accepts any integer 5–15s). The CLI does not apply this automatically — omitting `--duration` falls through to the API's own default (effectively 5s). Use shorter durations when justified (e.g. music beat alignment, pacing needs).
-- Prompts must be in English. Dialogue language matches the user's language.
+- Prompts must be in English, except prompts with embedded dialogue/voiceover — those stay in the user's language throughout (see language note above).
 - One mood per segment — no contradictory tone/color in the same prompt
 - Characters in 2+ segments: copy the full character description verbatim in every prompt. No abbreviation.
 - Human faces as `ref_image` may trigger privacy detection in some OpenRouter video/image models. If blocked, describe the character in text only and use a generated portrait (no real faces) as reference.
+- **Inline conversation images cannot be uploaded.** When the user pastes an image directly into the chat (no local file path), you can view it but `material upload` / `asset create` need a real file on disk. Tell the user: "I can see your image, but generating with it needs a local file path — please save it and share the path."
 - Serial continuity: use tail-frame → next `first_frame` when you need an exact opening composition/state carried into the next segment. This is the only supported continuity method — the CLI does not forward a previous segment's video as generation input.
 - Read video model capabilities before every prompt session: `Read ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/references/video-capabilities.md`
 
@@ -53,7 +57,7 @@ Don't guess — ask. Every detail the user confirms is one fewer reason to regen
 | **Story/Action** | What physically happens in the video | "What's the key action or event? Is there a conflict, reveal, or transformation?" |
 | **Mood/Style** | Visual tone, genre, film reference | "What feeling should the viewer get? Any visual references (film, anime, documentary)?" |
 | **Setting** | Location, time of day, environment | "Where does this take place? What time of day? Interior or exterior?" |
-| **Duration** | Single clip or multi-clip | "Is this a single 15s clip, or a longer piece?" |
+| **Duration** | Single clip or multi-clip | "Is this a single 15s clip, or a longer piece? If longer, how long in total? I'll split it into 15s segments." |
 | **Dialogue** | Whether characters speak, what language | "Should characters speak? In what language?" |
 | **Reference materials** | Existing images, character photos, product shots | "Do you have any reference images, character art, or product photos?" |
 
@@ -74,8 +78,9 @@ Do NOT describe product appearance in the prompt — it comes from the reference
 **Balance check** before generating:
 ```bash
 node ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/ironlabs-cli.mjs credit me
+node ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/ironlabs-cli.mjs credit estimate --model ironlabs-2.0 --duration 15
 ```
-Estimate: ~300 credits per 10s of video (scale accordingly for the 15s default segment), ~50 per character sheet image. Inform user if budget is tight vs. plan.
+`credit estimate` needs no API key and returns the real cost for a given model/duration (e.g. `ironlabs-2.0` at 10s is ~40 credits). Inform user if budget is tight vs. plan.
 
 ---
 
@@ -89,10 +94,12 @@ User brief → [Clarify if needed] → Write prompt → Confirm → Generate
 
 1. Check if the brief has enough detail. If not, ask targeted questions (see Intake above).
 2. Write one high-density prompt following prompt-craft.md
-3. Present to user, adjust on feedback
-4. Generate
+3. **Present the full prompt to the user and wait for explicit approval before calling `task generate`. Never skip this step.** Adjust on feedback until the user confirms.
+4. Generate — only after the user says yes
 
 ### Path 2: E-commerce / Product Clip (15s, 9:16)
+
+This path covers the common single-shot, live-presenter TikTok product video (commercial Scenario D). If the brief is instead a viral-video replication, a short product-only brand film (≤5s, no presenter), or a multi-shot TVC/brand narrative, route through `Read ${CLAUDE_SKILL_DIR}/commercial/INDEX.md` first — it picks the right scenario (A/B/C/D) before you write anything.
 
 ```
 Product image → Gemini analysis → Upload material → Write prompt → Generate
@@ -164,6 +171,8 @@ Anchors are tools, not a checklist. Analyze what each segment needs to stay cons
 | Anchor | `--materials` syntax | What it locks | When to use |
 |--------|---------------------|---------------|-------------|
 | Character reference image | `MAT_ID:ref_image` | Appearance, wardrobe | Character reference in 2+ segments |
+| Registered asset | `asset:ID:ref_image` | Same as above, reusable | Character/product reused across many generations or projects — register once with `asset create`, skip re-uploading the file every time |
+| Registered character | `--characters "ID:reference_image"` | Same as above, reusable | Same idea via the dedicated `character create` store, for identity refs specifically |
 | Previous segment end frame | `MAT_ID:first_frame` | Exact opening composition/state | Next segment must start exactly where the previous one lands |
 | Scene concept | `MAT_ID:ref_image` | Environment, lighting, palette | Location recurs or has specific visual requirements |
 | Text-only | Full description in prompt | Nothing locked visually | One-off segments, or no visual reference available |
@@ -190,9 +199,9 @@ S4    Maya + new location (café)                       "201:ref_image,204:ref_i
 
 **Generate a character sheet and upload it:**
 ```bash
-# 1. Generate character sheet with nano-banana-2
+# 1. Generate character sheet with nano-banana-2 (--resolution has no effect on image models; size comes from --ratio)
 node ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/ironlabs-cli.mjs task generate \
-  --model nano-banana-2 --resolution 2k --ratio 16:9 \
+  --model nano-banana-2 --ratio 16:9 \
   --prompt "<character sheet prompt: full body, neutral pose, white background, front-facing>"
 
 # 2. Download and upload as material
@@ -207,6 +216,14 @@ node ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/ironlabs-cli.mjs task generate \
 ```
 
 > **Note on faces**: OpenRouter video/image models may apply privacy detection to uploaded face photos. If a real person photo is blocked, generate an AI portrait of the character instead and upload that as the reference.
+
+**Reusing a character/product across many generations:** instead of re-uploading the same file with `material upload` in every session, register it once:
+```bash
+node ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/ironlabs-cli.mjs asset create char.png --type image
+# → prints asset ID, e.g. 27 — use as: --materials "asset:27:ref_image"
+node ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/ironlabs-cli.mjs asset list
+```
+This is a convenience for reuse, not a workaround for privacy detection — the same face-blocking rule above still applies to registered assets.
 
 ---
 
@@ -237,7 +254,7 @@ node ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/ironlabs-cli.mjs task generate \
   --materials "CHAR_MAT_ID:ref_image,91:first_frame,SCENE2_MAT_ID:ref_image"
 ```
 
-> **Note**: Generation takes 3–10 minutes per segment. If `task generate` times out, use `task create` (which runs synchronously and stores the result) — then `task result <id>` to retrieve it.
+> **Note**: Generation takes 3–10 minutes per segment and runs asynchronously server-side. If `task generate` times out client-side, use `task create` (returns immediately with status "pending") then `task wait <id> --timeout 900` to block until it finishes — `task result <id>` does NOT wait and returns no video URL for a still-pending task.
 
 **Batch all shots:**
 ```bash
