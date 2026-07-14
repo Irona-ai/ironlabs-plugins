@@ -22,7 +22,7 @@ The model responds to **specificity and physical detail**. Every action should h
 
 Persistent visual DNA. Film stock, lens, grade, aspect ratio. This stays **identical across all segments** of a multi-clip project.
 
-```
+```text
 Cinematic 16:9 widescreen. Shot on ARRI Alexa 65, Cooke vintage cinema lenses.
 35mm film grain, Kodak Vision3 500T grade - bleached desert, blown-out sky, brutal noon heat.
 Hyperrealistic skin, zero retouching. Hard overhead sun, ink-black shadows.
@@ -34,7 +34,7 @@ Not a checklist - a **visual world declaration**.
 
 Each character gets: **identity lock + appearance + wardrobe + narrative function + behavioral pattern**.
 
-```
+```text
 [CHARACTER: PROP SOURCER] Female, identity lock.
 Utility vest, all pockets stuffed with visibly wrong items, clipboard permanently in hand.
 She was responsible for bringing the props. She brought everything except the correct one.
@@ -45,7 +45,7 @@ For multi-clip: copy the **entire character block verbatim** into every segment 
 
 ### 3. Key Props & Environment (if important to the story)
 
-```
+```text
 THE PROP: One large decorative vase. Tall, ornate, needed on the pedestal for the shot.
 It is not here. It was never here. Everything that follows is a consequence of this single fact.
 
@@ -54,7 +54,7 @@ THE PEDESTAL: Center frame, background. Empty. Visible in almost every shot.
 
 ### 4. Genre Engine (optional but powerful)
 
-```
+```text
 [COMEDY ENGINE]
 The structure is a ratchet - each cycle tightens one notch:
 Wrong prop attempted → fails on set → blame exchanged → next wrong prop → fails worse → more blame.
@@ -80,12 +80,12 @@ Each beat should contain:
 ### 6. Sound Design (per-segment, not a footnote)
 
 **Bad:**
-```
+```text
 Sound design: desert ambient, SFX.
 ```
 
 **Good (per-beat sound layer):**
-```
+```text
 Sound: thermos placed on pedestal - a hollow metal ring - silence - footsteps returning -
 thermos placed back into hands - another hollow ring.
 ```
@@ -94,7 +94,7 @@ Write sound for **each timeline segment**. Layer ambient + action SFX + characte
 
 ### 7. Realism & Stability Lock (closing block)
 
-```
+```text
 [REALISM LOCK]
 Prop physics: thermos rings on pedestal accurately, cone construction topples
 with realistic wind physics and material cascade.
@@ -110,7 +110,7 @@ No music. No voiceover. No subtitles. No text. Diegetic audio only.
 
 When a character speaks, use the forced lip-sync format — this is what `video-capabilities.md` refers to as the "exact word-for-word embedding format":
 
-```
+```text
 Spoken dialogue (say EXACTLY, word-for-word): "Stop scrolling - I threw out all my gym equipment for these three bands."
 Mouth clearly visible when speaking, lip-sync aligned.
 ```
@@ -134,7 +134,7 @@ node "$CLI" task generate \
 
 In the prompt, describe each material by its role:
 
-```
+```text
 [CHARACTER] — see attached character reference image.
 Female, identity lock. Utility vest, clipboard in hand...
 
@@ -210,7 +210,7 @@ Accessories and unique features act as visual anchors — include in every promp
 
 ### Bridge formula
 Every segment after S1 must start with:
-```
+```text
 Continuing from the previous shot: [exact ending state of previous segment —
 character position, prop state, emotional state, lighting state].
 ```
@@ -259,7 +259,7 @@ When adapting existing material (novels, screenplays, manga):
 
 ## Complete Single-Clip Example
 
-```
+```text
 Cinematic 16:9 widescreen. Shot on ARRI Alexa 65, Cooke vintage cinema lenses.
 35mm film grain, Kodak Vision3 500T grade - bleached desert, blown-out sky, brutal noon heat.
 Hyperrealistic skin, zero retouching. Hard overhead sun, ink-black shadows.

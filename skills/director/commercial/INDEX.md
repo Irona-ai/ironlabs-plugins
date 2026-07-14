@@ -28,7 +28,7 @@ Route by asking these questions in order — stop at the first match:
 
 Every prompt must cover these six dimensions, assembled in this order:
 
-```
+```text
 Subject + Selling-Point Action + Scene & Tone + Camera Language + Audio + Post-Production Constraints
 ```
 
@@ -47,7 +47,7 @@ Subject + Selling-Point Action + Scene & Tone + Camera Language + Audio + Post-P
 
 Use `@` references in prompts to anchor visuals to the user's assets. Each reference must state **what is being referenced** and **what it's being used for**:
 
-```
+```text
 the serum glass bottle from @Image 1         ← what was referenced + what info was extracted
 reference the camera movement of @Video 1    ← explicitly only partial features, not everything
 ```
@@ -122,7 +122,7 @@ Build the prompt following the matched scenario file's structure. The six-dimens
 
 Present the full prompt in the standard preview format and wait for explicit confirmation before Phase 4:
 
-```
+```text
 --- Prompt Preview ---
 
 [Full prompt in USER'S LANGUAGE, each dimension as its own paragraph, tagged with [维度名称] / [Dimension Name] in user's language]

@@ -172,7 +172,7 @@ Anchors are tools, not a checklist. Analyze what each segment needs to stay cons
 |--------|---------------------|---------------|-------------|
 | Character reference image | `MAT_ID:ref_image` | Appearance, wardrobe | Character reference in 2+ segments |
 | Registered asset | `asset:ID:ref_image` | Same as above, reusable | Character/product reused across many generations or projects — register once with `asset create`, skip re-uploading the file every time |
-| Registered character | `--characters "ID:reference_image"` | Same as above, reusable | Same idea via the dedicated `character create` store, for identity refs specifically |
+| Registered character | `--characters "ID:reference_image"` (a separate flag, not `--materials`) | Same as above, reusable | Same idea via the dedicated `character create` store, for identity refs specifically |
 | Previous segment end frame | `MAT_ID:first_frame` | Exact opening composition/state | Next segment must start exactly where the previous one lands |
 | Scene concept | `MAT_ID:ref_image` | Environment, lighting, palette | Location recurs or has specific visual requirements |
 | Text-only | Full description in prompt | Nothing locked visually | One-off segments, or no visual reference available |

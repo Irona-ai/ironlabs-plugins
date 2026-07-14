@@ -409,7 +409,7 @@ const balance = Math.round(dollars * 100);
       if (params.resolution) input.resolution = params.resolution;
       if (params.ratio) input.aspect_ratio = params.ratio;
     }
-    console.log(`Calling ${model} directly via the fal connector (synchronous call — this blocks until the video finishes rendering)...`);
+    console.error(`Calling ${model} directly via the fal connector (synchronous call — this blocks until the video finishes rendering)...`);
     const result = await this.mcpCall("fal", "fal_run", { model, input });
     const videoUrl = result.video?.url || null;
     if (!videoUrl) throw new ApiError(500, result, "fal_run did not return a video URL");
@@ -922,7 +922,7 @@ async function taskChain(client, positional) {
     console.error("Error: task ID required.\nUsage: ironlabs task chain <id>\n\nDownloads a completed task result and re-uploads it as a material — an image becomes a ref_image/first_frame; a video becomes a ref_video (only usable with --model veo-3.1-extend / veo-3.1-extend-fast).");
     process.exit(1);
   }
-  console.log(`Getting result for task #${id}...`);
+  console.error(`Getting result for task #${id}...`);
   const result = await client.getTaskResult(id);
   const url = result.videoUrl || result.imageUrl;
   if (!url) {
@@ -932,7 +932,7 @@ async function taskChain(client, positional) {
   const isVideo = !!result.videoUrl;
   const ext = isVideo ? "mp4" : "png";
   const tmpPath = join(os.tmpdir(), `chain-${id}.${ext}`);
-  console.log(`Downloading ${isVideo ? "video" : "image"} to ${tmpPath}...`);
+  console.error(`Downloading ${isVideo ? "video" : "image"} to ${tmpPath}...`);
   // Video URLs from OpenRouter require gateway auth — use video_download connector
   let arrayBuf;
   if (isVideo) {
@@ -945,19 +945,19 @@ async function taskChain(client, positional) {
     arrayBuf = Buffer.from(await resp.arrayBuffer());
   }
   writeFileSync(tmpPath, arrayBuf);
-  console.log(`Downloaded: ${(arrayBuf.byteLength / 1024 / 1024).toFixed(1)}MB`);
+  console.error(`Downloaded: ${(arrayBuf.byteLength / 1024 / 1024).toFixed(1)}MB`);
   const type = isVideo ? "video" : "image";
   const buffer = readFileSync(tmpPath);
   const filename = `chain-${id}.${ext}`;
-  console.log(`Uploading as ${type} material...`);
+  console.error(`Uploading as ${type} material...`);
   const data = await client.uploadMaterial(buffer, filename, type);
   const matId = data.material?.id || data.id;
-  console.log(`\nMaterial #${matId} ready.`);
+  console.error(`\nMaterial #${matId} ready.`);
   if (isVideo) {
-    console.log(`Use as: --materials "${matId}:ref_video" --model veo-3.1-extend (or veo-3.1-extend-fast) — this is the only model that actually continues an existing video's motion.`);
-    console.log(`ref_video does NOT work with ironlabs-2.0 / ironlabs-2.0-fast / seedance-2.0 (all OpenRouter models) — none of them accept a video input. For continuity with those, extract a tail frame with ffmpeg and upload that as --materials "ID:first_frame" instead.`);
+    console.error(`Use as: --materials "${matId}:ref_video" --model veo-3.1-extend (or veo-3.1-extend-fast) — this is the only model that actually continues an existing video's motion.`);
+    console.error(`ref_video does NOT work with ironlabs-2.0 / ironlabs-2.0-fast / seedance-2.0 (all OpenRouter models) — none of them accept a video input. For continuity with those, extract a tail frame with ffmpeg and upload that as --materials "ID:first_frame" instead.`);
   } else {
-    console.log(`Use as: --materials "${matId}:ref_image"`);
+    console.error(`Use as: --materials "${matId}:ref_image"`);
   }
   json(data);
 }

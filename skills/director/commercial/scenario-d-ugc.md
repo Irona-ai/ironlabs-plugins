@@ -126,7 +126,7 @@ The single biggest failure mode for Scenario D is writing prompts that sound lik
 
 Organize along a **second-by-second timeline** — six dimensions interwoven into the chronology:
 
-```
+```text
 [Person & product anchoring — natural appearance, no beauty-filter. All @ references declared upfront.] [Subject]
 
 [0~Ns: Hook — pain-point / social-proof reply / skeptic opener + shot type] [Hook]

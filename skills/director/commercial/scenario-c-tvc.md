@@ -35,7 +35,7 @@ Generate as **one single API call**. Write all visual stages into one prompt + a
 - Brief is vague → propose a shot plan and wait for user confirmation before writing the prompt
 
 **Default arc when unspecified** (adjust freely):
-```
+```text
 [Shot 1 | 5s | Establishing] Ultra-wide panoramic of [environment], [light quality], camera slowly pushing forward.
 [Shot 2 | 5s | Character Intro] [Person] wearing [product], [action], follow-cam tracking, [environmental detail].
 [Shot 3 | 5s | Product Detail] Macro close-up of [product interacting with environment], camera orbiting. Fade to black.
@@ -92,7 +92,7 @@ If the user wants to redo a specific segment: regenerate that segment only, repl
 
 Present all shots together so the user sees the complete video in one view:
 
-```
+```text
 --- 分镜预览 (N shots / total Xs) ---
 
 [Shot 1 | Xs | label]
