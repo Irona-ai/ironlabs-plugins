@@ -339,13 +339,24 @@ const balance = Math.round(dollars * 100);
       }
       if (lastFrame?._dataUri) orArgs.last_image_url = lastFrame._dataUri;
       if (refImages.length) {
-        // Confirmed working (no longer speculative): IronLabs' video_submit
-        // connector now maps this to OpenRouter's real input_references field
-        // and binds @Image1/@Image2/... to array order, capped per-model
-        // server-side. The first ref_image is still also sent as image_url
-        // above (first_frame) — harmless duplication, kept for backward
-        // compatibility with prompts that don't use @ImageN tokens.
-        orArgs.reference_image_urls = refImages.map(m => m._dataUri).filter(Boolean);
+        // xAI's video_submit endpoint rejects requests that combine
+        // frame_images (built from image_url, set above) with
+        // input_references (built from reference_image_urls) — confirmed via
+        // a live 400: "xAI video generations do not support frame_images and
+        // input_references in the same request". image_url can't be omitted
+        // either (the tool schema requires it), so on this model there is no
+        // way to send reference_image_urls at all — fall back to the single
+        // reference already carried via image_url and warn instead of
+        // producing an opaque 500. Other OpenRouter models (Kling,
+        // Seedance) don't have this restriction and keep full @ImageN
+        // multi-reference support.
+        if (model === "x-ai/grok-imagine-video") {
+          if (refImages.length > 1) {
+            console.error(`Note: "${params.model}" can't combine multiple ref_image materials right now — xAI rejects frame_images + input_references together. Only the first reference image (already sent as image_url) will be used. For true multi-reference / @ImageN support, use --model ironlabs-2.0-fast, seedance-2.0, or grok-multiref instead.`);
+          }
+        } else {
+          orArgs.reference_image_urls = refImages.map(m => m._dataUri).filter(Boolean);
+        }
       }
       if (refVideo) {
         throw new ApiError(400, {}, `ref_video has no effect on "${model}" — OpenRouter's video_submit tool has no video-input field. Use --model veo-3.1-extend (or veo-3.1-extend-fast) for real motion continuation, or extract a tail frame with ffmpeg and pass it as --materials "ID:first_frame" instead.`);
