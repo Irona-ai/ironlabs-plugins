@@ -194,18 +194,16 @@ var IronlabsClient = class {
   // ---- Credit ----
   async getMe() {
     const data = await this.request("GET", "/chat/balance");
+    const raw = data.data?.totalBalance ?? data.balance;
     if (raw == null) {
-  throw new ApiError(500, data, "Balance response did not include a totalBalance value");
-}
-
-const dollars = typeof raw === "string" ? parseFloat(raw) : raw;
-
-if (typeof dollars !== "number" || Number.isNaN(dollars)) {
-  throw new ApiError(500, data, "Balance response did not include a valid totalBalance value");
-}
-
-// totalBalance is in dollars; normalize to cents.
-const balance = Math.round(dollars * 100);
+      throw new ApiError(500, data, "Balance response did not include a totalBalance value");
+    }
+    const dollars = typeof raw === "string" ? parseFloat(raw) : raw;
+    if (typeof dollars !== "number" || Number.isNaN(dollars)) {
+      throw new ApiError(500, data, "Balance response did not include a valid totalBalance value");
+    }
+    // totalBalance is in dollars; normalize to cents.
+    const balance = Math.round(dollars * 100);
     return { user: { id: "ironlabs-user", balance }, balance };
   }
   async estimateCost(params = {}) {

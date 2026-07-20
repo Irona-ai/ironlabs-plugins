@@ -188,7 +188,6 @@ Pass any `provider/model` path directly to skip aliasing.
 | `first_frame` | `image_url` (video) | Pin opening frame |
 | `last_frame` | `last_image_url` (video) | Pin closing frame |
 | `ref_image` | `image_url` (image or video) | Style reference (also used as first frame) |
-| `ref_video` | — | Motion/style carryover (not yet wired to an OpenRouter field) |
 
 Materials are stored locally in `~/.ironlabs/materials/` as base64 by `ironlabs-cli.mjs`.
 
