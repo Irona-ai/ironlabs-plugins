@@ -203,6 +203,13 @@ var IronlabsClient = class {
     if (!content?.length) throw new ApiError(500, {}, "Empty MCP response");
     const textContent = content.find(c => c.type === "text");
     if (!textContent) throw new ApiError(500, {}, "No text content in MCP response");
+    // Tool-level failures (e.g. "missing required argument", "prompt exceeds
+    // the maximum allowed length") come back as isError:true with the real
+    // reason in textContent.text — surface it directly instead of letting it
+    // fall through to the JSON.parse fallback below, which would silently
+    // wrap it as { text: ... } and produce a misleading generic error
+    // downstream (e.g. "did not return a generation id").
+    if (result.result?.isError) throw new ApiError(400, result.result, textContent.text);
     try { return JSON.parse(textContent.text); } catch { return { text: textContent.text }; }
   }
   // ---- Credit ----
