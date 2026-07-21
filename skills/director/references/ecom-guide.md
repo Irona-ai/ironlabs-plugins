@@ -94,6 +94,31 @@ Mouth clearly visible when speaking, lip-sync aligned.
 
 ---
 
+## Physical Continuity Rule
+
+The model cannot generate implicit state transitions — it teleports between states (cap on → product applied; sealed bag → open; folded clothing → worn). Any product moving from **packaged/stored state** to **in-use state** must use one of two strategies:
+
+- **Skip the transition**: begin the timeline with the product already in its in-use state. Never mention the packaged state in the same or adjacent time segment.
+- **Make it explicit**: dedicate a separate time segment to the preparation action ("model unscrews the cap and sets it aside"), then start the demo in the next segment.
+
+Applies to any packaging: bottle caps, sealed pouches, cardboard boxes, clothing tags, zip-lock bags, foil wrappers, shoe boxes.
+
+## Action Granularity Rule
+
+Never compress a multi-step physical process into one sentence — the model renders a single sentence as a single instantaneous event.
+
+**Minimum 3 sub-steps per demo action**, each on its own sentence, each describing the **mid-action / incomplete state** — not the end state:
+
+| ❌ Compressed (avoid) | ✅ Granular (target) |
+|---|---|
+| "pumps foundation onto cheek and blends it in" | ① A small pump of product lands on the cheekbone. ② One fingertip gently taps the center — product not yet spread. ③ Slow outward circles; edges still unblended at the frame edge. |
+| "rubs the serum onto her arm and it absorbs" | ① Drops serum onto the back of the hand, lets it pool. ② Fingertip spreads it across half the skin — other half still bare. ③ Presses palm flat; skin slowly drinks it in. |
+| "tries on the jacket and zips it up" | ① Slides one arm in, sleeve hanging loose. ② Pulls the other side across the chest, fabric slightly bunched. ③ Zipper drawn up slowly, jacket settling into shape. |
+
+Add pace qualifiers to each sub-step: *slowly*, *gently*, *just barely*, *one corner at a time*. Give the model a continuous journey, not a jump cut.
+
+---
+
 ## Camera Pacing
 
 ```

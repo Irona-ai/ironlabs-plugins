@@ -126,6 +126,20 @@ const IMAGE_MODEL_MAP = {
   "midjourney":      "google/gemini-3.1-flash-image-preview",
   "gpt-image-2":     "google/gemini-3.1-flash-image-preview",
 };
+
+// Fal.ai-hosted endpoints called directly via the "fal" MCP connector's
+// fal_run tool — bypasses the openrouter connector's video_submit, whose
+// schema only accepts one first_frame/last_frame image and has no
+// multi-image-reference or video-to-video field. Confirmed against fal.ai's
+// own API docs (input/output schemas):
+//   grok-multiref       https://fal.ai/models/xai/grok-imagine-video/reference-to-video/api
+//   veo-3.1-extend      https://fal.ai/models/fal-ai/veo3.1/extend-video/api
+//   veo-3.1-extend-fast https://fal.ai/models/fal-ai/veo3.1/fast/extend-video/api
+const FAL_VIDEO_MODEL_MAP = {
+  "grok-multiref":       "xai/grok-imagine-video/reference-to-video",
+  "veo-3.1-extend":      "fal-ai/veo3.1/extend-video",
+  "veo-3.1-extend-fast": "fal-ai/veo3.1/fast/extend-video",
+};
 const RATIO_TO_IMAGE_SIZE = {
   "1:1":  "1024x1024",
   "16:9": "1536x1024",
@@ -189,6 +203,13 @@ var IronlabsClient = class {
     if (!content?.length) throw new ApiError(500, {}, "Empty MCP response");
     const textContent = content.find(c => c.type === "text");
     if (!textContent) throw new ApiError(500, {}, "No text content in MCP response");
+    // Tool-level failures (e.g. "missing required argument", "prompt exceeds
+    // the maximum allowed length") come back as isError:true with the real
+    // reason in textContent.text — surface it directly instead of letting it
+    // fall through to the JSON.parse fallback below, which would silently
+    // wrap it as { text: ... } and produce a misleading generic error
+    // downstream (e.g. "did not return a generation id").
+    if (result.result?.isError) throw new ApiError(400, result.result, textContent.text);
     try { return JSON.parse(textContent.text); } catch { return { text: textContent.text }; }
   }
   // ---- Credit ----
@@ -239,6 +260,17 @@ var IronlabsClient = class {
     return (isImage ? IMAGE_MODEL_MAP : VIDEO_MODEL_MAP)[model] ||
       (isImage ? "google/gemini-3.1-flash-image-preview" : "x-ai/grok-imagine-video");
   }
+  // Fal-direct models (see FAL_VIDEO_MODEL_MAP) bypass the openrouter
+  // connector entirely — checked before mapModel() so a fal alias never
+  // silently falls back to the default grok-imagine-video OR model.
+  isFalDirectModel(model) {
+    if (!model) return false;
+    return Object.prototype.hasOwnProperty.call(FAL_VIDEO_MODEL_MAP, model) ||
+      Object.values(FAL_VIDEO_MODEL_MAP).includes(model);
+  }
+  mapFalModel(model) {
+    return FAL_VIDEO_MODEL_MAP[model] || model;
+  }
   async createTask(params) {
     const isImage = this.isImageModel(params.model);
     // Resolve material data URIs from local store
@@ -251,8 +283,13 @@ var IronlabsClient = class {
         if (matData) mat._dataUri = matData.dataUri || matData.url;
       }
     }
-    const model = this.mapModel(params.model, isImage);
     const taskId = nextId();
+    // Fal-direct models (grok-multiref, veo-3.1-extend...) skip the OpenRouter
+    // path entirely — checked before mapModel() so the alias resolves correctly.
+    if (this.isFalDirectModel(params.model)) {
+      return this._createFalTask(params, taskId);
+    }
+    const model = this.mapModel(params.model, isImage);
     const { credits: estimatedCredit } = await this.estimateCost({ model: params.model, duration: params.duration });
     if (isImage) {
       // image_generate via openrouter connector — returns a chat-completion with image modality
@@ -288,14 +325,46 @@ var IronlabsClient = class {
     } else {
       // video_submit via openrouter connector — async, returns { id, polling_url, status }
       // image_url is optional: omit it for pure text-to-video.
-      const firstFrame = params.materials?.find(m => m.role === "first_frame" || m.role === "ref_image");
+      const firstFrame = params.materials?.find(m => m.role === "first_frame");
       const lastFrame  = params.materials?.find(m => m.role === "last_frame");
+      const refImages  = params.materials?.filter(m => m.role === "ref_image") || [];
+      const refVideo   = params.materials?.find(m => m.role === "ref_video");
       const orArgs = {
         prompt: params.prompt,
         model,
       };
-      if (firstFrame?._dataUri) orArgs.image_url = firstFrame._dataUri;
+      if (firstFrame?._dataUri) {
+        orArgs.image_url = firstFrame._dataUri;
+      } else if (refImages[0]?._dataUri) {
+        // No explicit first_frame: fall back to the first ref_image as image_url,
+        // preserving the previously-working single-reference behavior even if
+        // reference_image_urls below is ignored by the connector.
+        orArgs.image_url = refImages[0]._dataUri;
+      }
       if (lastFrame?._dataUri) orArgs.last_image_url = lastFrame._dataUri;
+      if (refImages.length) {
+        // xAI's video_submit endpoint rejects requests that combine
+        // frame_images (built from image_url, set above) with
+        // input_references (built from reference_image_urls) — confirmed via
+        // a live 400: "xAI video generations do not support frame_images and
+        // input_references in the same request". image_url can't be omitted
+        // either (the tool schema requires it), so on this model there is no
+        // way to send reference_image_urls at all — fall back to the single
+        // reference already carried via image_url and warn instead of
+        // producing an opaque 500. Other OpenRouter models (Kling,
+        // Seedance) don't have this restriction and keep full @ImageN
+        // multi-reference support.
+        if (model === "x-ai/grok-imagine-video") {
+          if (refImages.length > 1) {
+            console.error(`Note: "${params.model}" can't combine multiple ref_image materials right now — xAI rejects frame_images + input_references together. Only the first reference image (already sent as image_url) will be used. For true multi-reference / @ImageN support, use --model ironlabs-2.0-fast, seedance-2.0, or grok-multiref instead.`);
+          }
+        } else {
+          orArgs.reference_image_urls = refImages.map(m => m._dataUri).filter(Boolean);
+        }
+      }
+      if (refVideo) {
+        throw new ApiError(400, {}, `ref_video has no effect on "${model}" — OpenRouter's video_submit tool has no video-input field. Use --model veo-3.1-extend (or veo-3.1-extend-fast) for real motion continuation, or extract a tail frame with ffmpeg and pass it as --materials "ID:first_frame" instead.`);
+      }
       if (params.duration) orArgs.duration = parseInt(params.duration);
       if (params.ratio)    orArgs.aspect_ratio = params.ratio;
       if (params.resolution) {
@@ -322,6 +391,55 @@ var IronlabsClient = class {
       return { task: { id: taskId, status: "pending", estimatedCredit } };
     }
   }
+  // Calls a Fal.ai model directly via the "fal" connector's fal_run tool —
+  // used for capabilities the openrouter connector's video_submit doesn't
+  // expose (multi-image reference-to-video, video-to-video extension).
+  // Unlike video_submit, fal_run is synchronous: the task is "completed" as
+  // soon as this call returns (no polling / task wait needed).
+  async _createFalTask(params, taskId) {
+    const model = this.mapFalModel(params.model);
+    const isExtend = model.includes("extend-video");
+    const input = { prompt: params.prompt };
+    if (isExtend) {
+      // veo-3.1-extend(-fast): true video-to-video continuation. Requires the
+      // source clip as ref_video — get one via "ironlabs task chain <id>".
+      const refVideo = params.materials?.find(m => m.role === "ref_video");
+      if (!refVideo?._dataUri) {
+        throw new ApiError(400, {}, `Model "${params.model}" extends an existing video — attach the source clip with --materials "ID:ref_video" (get an ID via "ironlabs task chain <prior-task-id>").`);
+      }
+      input.video_url = refVideo._dataUri;
+      if (params.duration) input.duration = `${parseInt(params.duration)}s`;
+      if (params.resolution) input.resolution = params.resolution;
+      if (params.ratio) input.aspect_ratio = params.ratio;
+    } else {
+      // grok-multiref: reference-to-video with 1-7 images, bound to
+      // @Image1/@Image2/... tokens in the prompt in upload order.
+      const refImages = (params.materials?.filter(m => m.role === "ref_image") || [])
+        .map(m => m._dataUri).filter(Boolean);
+      if (!refImages.length) {
+        throw new ApiError(400, {}, `Model "${params.model}" needs at least one reference image — attach with --materials "ID:ref_image" (up to 7), then reference each in --prompt as @Image1, @Image2, etc. in upload order.`);
+      }
+      if (refImages.length > 7) {
+        throw new ApiError(400, {}, `Model "${params.model}" supports at most 7 reference images, got ${refImages.length} — remove some --materials "ID:ref_image" entries.`);
+      }
+      input.reference_image_urls = refImages;
+      if (params.duration) input.duration = parseInt(params.duration);
+      if (params.resolution) input.resolution = params.resolution;
+      if (params.ratio) input.aspect_ratio = params.ratio;
+    }
+    console.error(`Calling ${model} directly via the fal connector (synchronous call — this blocks until the video finishes rendering)...`);
+    const result = await this.mcpCall("fal", "fal_run", { model, input });
+    const videoUrl = result.video?.url || null;
+    if (!videoUrl) throw new ApiError(500, result, "fal_run did not return a video URL");
+    const stored = {
+      taskId, status: "completed",
+      model, prompt: params.prompt,
+      tags: params.tags || [],
+      videoUrl, imageUrl: null, falResult: result,
+    };
+    writeTask(taskId, stored);
+    return { task: { id: taskId, status: "completed", estimatedCredit: 0 } };
+  }
   async listTasks(params = {}) {
     return { tasks: listLocalTasks(params) };
   }
@@ -342,7 +460,7 @@ var IronlabsClient = class {
     return {};
   }
   async listTags() { return { tags: [] }; }
-  async waitForTask(id) {
+  async waitForTask(id, maxWaitMs = 600_000) {
     const result = readTask(id);
     if (!result) throw new ApiError(404, {}, `Task #${id} not found`);
     if (result.status === "completed") return result;
@@ -350,9 +468,9 @@ var IronlabsClient = class {
     const generationId = result._openrouterId;
     if (!generationId) throw new ApiError(500, {}, `Task #${id} has no generation ID to poll`);
     const start = Date.now();
-    const maxWaitMs = 600_000;
     while (Date.now() - start < maxWaitMs) {
-      await new Promise(r => setTimeout(r, 10_000)); // poll every 10s
+      const remaining = maxWaitMs - (Date.now() - start);
+      await new Promise(r => setTimeout(r, Math.min(10_000, remaining))); // poll every 10s, capped by remaining timeout
       const poll = await this.mcpCall("openrouter", "video_status", { id: generationId });
       process.stderr.write(`  Status: ${poll.status || "unknown"}... (${Math.round((Date.now() - start) / 1000)}s elapsed)\n`);
       if (poll.status === "completed") {
@@ -574,7 +692,9 @@ Global Flags:
 Run "ironlabs <domain> help" for domain-specific commands.
 
 Note: generation routes through the IronLabs OpenRouter connector — only IRONLABS_API_KEY needed.
-      Video tasks are async: task generate polls until done (~1-5 min).
+      Image tasks complete synchronously: task create/result already have the final image.
+      Video tasks are async: task create returns immediately with status "pending" — use
+      task wait <id> (or task generate, which is create+wait in one step) to block until done.
       Results are cached locally in ~/.ironlabs/tasks/.
       Materials are stored locally in ~/.ironlabs/materials/.
 `.trim();
@@ -583,13 +703,18 @@ ironlabs task — Manage generation tasks
 
 Commands:
   generate                    Create task + wait for result (one step)
-  create                      Create a task (async via OpenRouter; poll with task wait/result)
+  create                      Create a task. Images: completes synchronously. Videos:
+                               returns immediately with status "pending" — call task wait
+                               (or task generate) to actually block until the video is done.
   list                        List local tasks
   get <id>                    Get task detail
-  result <id>                 Get task result
-  wait <id>                   Wait for task (already done — returns cached result)
+  result <id>                 Get the cached task result as-is (does NOT wait — for a
+                               still-pending video task this returns no videoUrl yet)
+  wait <id> [--timeout <s>]   Wait for task to finish (instant if already done, otherwise
+                               polls; default timeout 600s)
   cancel <id>                 Cancel a task (no-op for synchronous tasks)
-  chain <id>                  Download completed task result → upload as material (e.g. for first_frame chaining)
+  chain <id>                  Download completed task result → upload as material (first_frame chaining for any
+                               model, or ref_video — only usable with --model veo-3.1-extend/-fast)
   tags                        List all your tags
   tag <id> --tags a,b,c       Update tags on a task
 
@@ -601,22 +726,58 @@ Options for generate/create:
   --resolution <1k|2k|4k>     Image resolution (image models)
   --tags <a,b,c>              Comma-separated tags
   --materials <spec>          Material refs: "id:role" or "id1:role1,id2:role2"
+                               Roles: ref_image, first_frame, last_frame, ref_video
+                               ref_image: 1+ supported on every model now, incl. the default — bind each to
+                               @Image1, @Image2, ... tokens in --prompt, in upload order.
+                               ref_video: only works with --model veo-3.1-extend / veo-3.1-extend-fast — a hard
+                               error on every other model (they have no video-input field at all).
+
+Options for generate/wait:
+  --timeout <seconds>          Max time to poll a pending video task (default: 600)
 
 Model aliases:
-  ironlabs-2.0         → x-ai/grok-imagine-video (video, default)
-  ironlabs-2.0-fast    → kwaivgi/kling-v3.0-pro (video)
-  seedance-2.0        → bytedance/seedance-2.0 (video)
-  nano-banana-2       → google/gemini-3.1-flash-image-preview (image)
+  ironlabs-2.0          → x-ai/grok-imagine-video, via OpenRouter (video, default; async, poll with task wait)
+                          Supports multiple ref_image + @ImageN binding directly — no model switch needed.
+  ironlabs-2.0-fast     → kwaivgi/kling-v3.0-pro, via OpenRouter (video; async; same multi-ref support)
+  seedance-2.0          → bytedance/seedance-2.0, via OpenRouter (video; async; same multi-ref support)
+  nano-banana-2         → google/gemini-3.1-flash-image-preview (image)
+  grok-multiref         → xai/grok-imagine-video/reference-to-video, direct via fal (video; synchronous). An
+                          alternative path to the same @ImageN capability ironlabs-2.0 now has — only reach for
+                          this if you specifically want the fal-direct synchronous call instead of the async
+                          OpenRouter default.
+  veo-3.1-extend        → fal-ai/veo3.1/extend-video, direct via fal (video; synchronous). The ONLY model that
+                          continues an existing video's motion — requires exactly one --materials "ID:ref_video"
+                          (from "task chain"). No OpenRouter equivalent exists for this.
+  veo-3.1-extend-fast   → fal-ai/veo3.1/fast/extend-video, direct via fal (video; synchronous, faster/cheaper)
   (any full OpenRouter model path used directly, e.g. bytedance/seedance-2.0)
+
+Note: multi-image reference (ref_image ×2+, @ImageN binding) works on every video model above, OpenRouter or fal —
+      OpenRouter's video_submit connector maps ref_image materials to its own input_references field. True video
+      continuation (ref_video) has no OpenRouter path at all; veo-3.1-extend/-fast are the only way to get it, and
+      they (like grok-multiref) call fal directly and complete synchronously — do not call "task wait" for them.
 
 Examples:
   ironlabs task generate --prompt "a cat dancing" --duration 5
   ironlabs task generate --prompt "cute cat" --model nano-banana-2 --resolution 2k
   ironlabs task generate --prompt "hero product shot" --model gpt-image-2 --ratio 16:9
   ironlabs task create --prompt "epic scene" --duration 10 --ratio 16:9
+  ironlabs task wait 1234567890 --timeout 300
   ironlabs task list --status completed --limit 5
   ironlabs task result 1234567890
   ironlabs task chain 1234567890
+
+  # Multi-reference (@Image1/@Image2 binding) — works on the default model directly:
+  IMG1=$(node ironlabs-cli.mjs material upload girl.jpg | jq -r '.material.id')
+  IMG2=$(node ironlabs-cli.mjs material upload hallway.jpg | jq -r '.material.id')
+  node ironlabs-cli.mjs task generate \\
+    --prompt "@Image1 walks down the hallway, @Image2 visible in the background" \\
+    --materials "\${IMG1}:ref_image,\${IMG2}:ref_image"
+
+  # True video continuation — the only model that can do this:
+  CLIP1_MAT=$(node ironlabs-cli.mjs task chain 1234567890 | jq -r '.material.id')
+  node ironlabs-cli.mjs task generate --model veo-3.1-extend \\
+    --prompt "Continue the scene naturally, same motion and style" \\
+    --materials "\${CLIP1_MAT}:ref_video"
 `.trim();
 var HELP_MATERIAL = `
 ironlabs material — Manage materials
@@ -701,11 +862,12 @@ async function taskGenerate(client, flags) {
     process.exit(1);
   }
   const params = buildCreateParams(flags);
-  console.log("Creating task...");
+  console.error("Creating task...");
   const { task } = await client.createTask(params);
-  console.log(`Task #${task.id} created (${task.status}).`);
-  const result = await client.waitForTask(task.id);
-  console.log("\nDone!");
+  console.error(`Task #${task.id} created (${task.status}).`);
+  const maxWaitMs = flags.timeout ? parseInt(flags.timeout) * 1000 : undefined;
+  const result = await client.waitForTask(task.id, maxWaitMs);
+  console.error("Done!");
   printResult(result);
 }
 async function taskCreate(client, flags) {
@@ -716,7 +878,7 @@ async function taskCreate(client, flags) {
   }
   const params = buildCreateParams(flags);
   const data = await client.createTask(params);
-  console.log(`Task created: id=${data.task.id}, status=${data.task.status}`);
+  console.error(`Task created: id=${data.task.id}, status=${data.task.status}`);
   json(data);
 }
 async function taskList(client, flags) {
@@ -752,15 +914,16 @@ async function taskResult(client, positional) {
   const result = await client.getTaskResult(id);
   printResult(result);
 }
-async function taskWait(client, positional) {
+async function taskWait(client, positional, flags) {
   const id = parseInt(positional[0]);
   if (!id) {
-    console.error("Error: task ID required.\nUsage: ironlabs task wait <id>");
+    console.error("Error: task ID required.\nUsage: ironlabs task wait <id> [--timeout <seconds>]");
     process.exit(1);
   }
-  console.log(`Task #${id}: checking cached result (tasks are synchronous)...`);
-  const result = await client.waitForTask(id);
-  console.log("\nDone!");
+  console.error(`Task #${id}: waiting for completion (instant if already done, polls if still pending)...`);
+  const maxWaitMs = flags.timeout ? parseInt(flags.timeout) * 1000 : undefined;
+  const result = await client.waitForTask(id, maxWaitMs);
+  console.error("Done!");
   printResult(result);
 }
 async function taskCancel(client, positional) {
@@ -775,10 +938,10 @@ async function taskCancel(client, positional) {
 async function taskChain(client, positional) {
   const id = parseInt(positional[0]);
   if (!id) {
-    console.error("Error: task ID required.\nUsage: ironlabs task chain <id>\n\nDownloads a completed task result and re-uploads it as a material (e.g. for extracting a tail frame to use as first_frame in the next segment).");
+    console.error("Error: task ID required.\nUsage: ironlabs task chain <id>\n\nDownloads a completed task result and re-uploads it as a material — an image becomes a ref_image/first_frame; a video becomes a ref_video (only usable with --model veo-3.1-extend / veo-3.1-extend-fast).");
     process.exit(1);
   }
-  console.log(`Getting result for task #${id}...`);
+  console.error(`Getting result for task #${id}...`);
   const result = await client.getTaskResult(id);
   const url = result.videoUrl || result.imageUrl;
   if (!url) {
@@ -788,7 +951,7 @@ async function taskChain(client, positional) {
   const isVideo = !!result.videoUrl;
   const ext = isVideo ? "mp4" : "png";
   const tmpPath = join(os.tmpdir(), `chain-${id}.${ext}`);
-  console.log(`Downloading ${isVideo ? "video" : "image"} to ${tmpPath}...`);
+  console.error(`Downloading ${isVideo ? "video" : "image"} to ${tmpPath}...`);
   // Video URLs from OpenRouter require gateway auth — use video_download connector
   let arrayBuf;
   if (isVideo) {
@@ -801,18 +964,19 @@ async function taskChain(client, positional) {
     arrayBuf = Buffer.from(await resp.arrayBuffer());
   }
   writeFileSync(tmpPath, arrayBuf);
-  console.log(`Downloaded: ${(arrayBuf.byteLength / 1024 / 1024).toFixed(1)}MB`);
+  console.error(`Downloaded: ${(arrayBuf.byteLength / 1024 / 1024).toFixed(1)}MB`);
   const type = isVideo ? "video" : "image";
   const buffer = readFileSync(tmpPath);
   const filename = `chain-${id}.${ext}`;
-  console.log(`Uploading as ${type} material...`);
+  console.error(`Uploading as ${type} material...`);
   const data = await client.uploadMaterial(buffer, filename, type);
   const matId = data.material?.id || data.id;
-  console.log(`\nMaterial #${matId} ready.`);
+  console.error(`\nMaterial #${matId} ready.`);
   if (isVideo) {
-    console.log(`Note: video isn't a supported --materials role. Extract a tail frame with ffmpeg and upload that instead for first_frame continuity.`);
+    console.error(`Use as: --materials "${matId}:ref_video" --model veo-3.1-extend (or veo-3.1-extend-fast) — this is the only model that actually continues an existing video's motion.`);
+    console.error(`ref_video does NOT work with ironlabs-2.0 / ironlabs-2.0-fast / seedance-2.0 (all OpenRouter models) — none of them accept a video input. For continuity with those, extract a tail frame with ffmpeg and upload that as --materials "ID:first_frame" instead.`);
   } else {
-    console.log(`Use as: --materials "${matId}:ref_image"`);
+    console.error(`Use as: --materials "${matId}:ref_image"`);
   }
   json(data);
 }
@@ -979,9 +1143,9 @@ function buildCreateParams(flags) {
   return params;
 }
 function printResult(result) {
-  console.log(`Task #${result.taskId}  ${result.status}`);
-  if (result.videoUrl) console.log(`  Video: ${result.videoUrl}`);
-  if (result.imageUrl) console.log(`  Image: ${result.imageUrl}`);
+  console.error(`Task #${result.taskId}  ${result.status}`);
+  if (result.videoUrl) console.error(`  Video: ${result.videoUrl}`);
+  if (result.imageUrl) console.error(`  Image: ${result.imageUrl}`);
   json(result);
 }
 var DOMAIN_HELP = {
