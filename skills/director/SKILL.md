@@ -15,7 +15,7 @@ description: >
 allowed-tools: Bash, Read
 metadata:
   author: ironlabs
-  version: 0.1.0
+  version: 0.2.1
   category: video-production
   tags: [director, creative, video, product, ecommerce, short-film, narrative, story]
 ---

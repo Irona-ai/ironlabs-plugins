@@ -20,8 +20,8 @@
  *   --resolution <level>  low|medium|high|ultra_high (hint only, for prompt context)
  *   --mode <name>         Preset: product, video-script, style
  *   --model <name>        IronLabs model name (default: google/gemini-3.5-flash)
- *   --temperature <n>     Temperature (default: 1.0)
- *   --max-tokens <n>      Max output tokens (default: 8192)
+ *   --temperature <n>     Accepted but NOT supported by the gateway — ignored (warns on stderr)
+ *   --max-tokens <n>      Accepted but NOT supported by the gateway — ignored (warns on stderr)
  *   --json                Request JSON-only response
  *
  * Environment:
@@ -282,8 +282,8 @@ Options:
   --resolution <level>  low / medium / high / ultra_high (hint only)
   --mode <name>         Preset: product, video-script, style
   --model <name>        IronLabs model (default: google/gemini-3.5-flash)
-  --temperature <n>     Temperature (default: 1.0)
-  --max-tokens <n>      Max output tokens (default: 8192)
+  --temperature <n>     Not supported by the gateway — ignored
+  --max-tokens <n>      Not supported by the gateway — ignored
   --json                Request JSON-only response
 
 Requires: IRONLABS_API_KEY

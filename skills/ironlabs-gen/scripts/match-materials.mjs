@@ -14,8 +14,10 @@
  * Usage:
  *   node match-materials.mjs --pool material-pool.json --shots project.json [--output mapping.json]
  *
- * Output materials flags use localPath so they can be passed directly to video-gen.sh:
- *   --materials "assets/char.jpg:ref_image,assets/scene.jpg:ref_image"
+ * The mapping lists each match by localPath + suggestedRole. `task generate --materials`
+ * consumes uploaded material IDs (not file paths), so each localPath must first be
+ * uploaded with `ironlabs-cli.mjs material upload <path>` and the returned numeric ID
+ * substituted into the flag. The stderr summary prints the exact upload commands.
  */
 
 import { readFileSync, writeFileSync, existsSync } from 'fs';
@@ -114,14 +116,24 @@ for (const { shot_id, matches } of mapping) {
   }
 }
 
-console.error('\n  --materials flags per shot:\n');
+// `task generate --materials` takes uploaded material IDs, not file paths. Emit the
+// upload command for each matched file plus a --materials template with ${VAR} slots
+// the caller fills from `material upload` output — never bare paths (parseInt(path) → NaN
+// → the CLI silently drops the material).
+const uploadVar = (shotId, i) => `${String(shotId).replace(/[^A-Za-z0-9]/g, '_').toUpperCase()}_MAT${i + 1}`;
+
+console.error('\n  Upload matched files, then pass the returned IDs to task generate:\n');
 for (const { shot_id, matches } of mapping) {
   const needsExtraction = matches.filter(m => m.suggestedRole === 'needs-frame-extraction');
   const usable = matches.filter(m => m.suggestedRole === 'ref_image' || m.suggestedRole === 'first_frame');
   if (usable.length === 0) {
     console.error(`  ${shot_id}: (no materials)`);
   } else {
-    const flag = usable.map(m => `${m.localPath}:${m.suggestedRole}`).join(',');
+    const vars = usable.map((m, i) => uploadVar(shot_id, i));
+    usable.forEach((m, i) => {
+      console.error(`  ${shot_id}: ${vars[i]}=$(node ironlabs-cli.mjs material upload "${m.localPath}" | jq -r '.material.id')`);
+    });
+    const flag = usable.map((m, i) => `\${${vars[i]}}:${m.suggestedRole}`).join(',');
     console.error(`  ${shot_id}: --materials "${flag}"`);
   }
   for (const m of needsExtraction) {

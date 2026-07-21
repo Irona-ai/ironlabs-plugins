@@ -64,17 +64,16 @@ export async function refreshFromApi(): Promise<void> {
   })
   if (!res.ok) return
 
-    const json = await res.json() as {
-  data?: { totalBalance?: string | number },
-  balance?: string | number
-}
+  const json = await res.json() as {
+    data?: { totalBalance?: string | number },
+    balance?: string | number
+  }
 
-const raw = json.data?.totalBalance ?? json.balance
-const dollars = typeof raw === 'string' ? parseFloat(raw) : raw
+  const raw = json.data?.totalBalance ?? json.balance
+  const dollars = typeof raw === 'string' ? parseFloat(raw) : raw
 
-if (typeof dollars === 'number' && !Number.isNaN(dollars)) {
-  // totalBalance is denominated in dollars — convert to cents to match BalanceData's contract.
-  writeCache(Math.round(dollars * 100))
-}
+  if (typeof dollars === 'number' && !Number.isNaN(dollars)) {
+    // totalBalance is denominated in dollars — convert to cents to match BalanceData's contract.
+    writeCache(Math.round(dollars * 100))
   }
 }
