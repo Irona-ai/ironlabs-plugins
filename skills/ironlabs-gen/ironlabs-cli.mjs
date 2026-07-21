@@ -419,7 +419,10 @@ var IronlabsClient = class {
       if (!refImages.length) {
         throw new ApiError(400, {}, `Model "${params.model}" needs at least one reference image — attach with --materials "ID:ref_image" (up to 7), then reference each in --prompt as @Image1, @Image2, etc. in upload order.`);
       }
-      input.reference_image_urls = refImages.slice(0, 7);
+      if (refImages.length > 7) {
+        throw new ApiError(400, {}, `Model "${params.model}" supports at most 7 reference images, got ${refImages.length} — remove some --materials "ID:ref_image" entries.`);
+      }
+      input.reference_image_urls = refImages;
       if (params.duration) input.duration = parseInt(params.duration);
       if (params.resolution) input.resolution = params.resolution;
       if (params.ratio) input.aspect_ratio = params.ratio;
@@ -466,7 +469,8 @@ var IronlabsClient = class {
     if (!generationId) throw new ApiError(500, {}, `Task #${id} has no generation ID to poll`);
     const start = Date.now();
     while (Date.now() - start < maxWaitMs) {
-      await new Promise(r => setTimeout(r, 10_000)); // poll every 10s
+      const remaining = maxWaitMs - (Date.now() - start);
+      await new Promise(r => setTimeout(r, Math.min(10_000, remaining))); // poll every 10s, capped by remaining timeout
       const poll = await this.mcpCall("openrouter", "video_status", { id: generationId });
       process.stderr.write(`  Status: ${poll.status || "unknown"}... (${Math.round((Date.now() - start) / 1000)}s elapsed)\n`);
       if (poll.status === "completed") {
