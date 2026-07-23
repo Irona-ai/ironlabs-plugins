@@ -45,7 +45,7 @@ function balanceCacheFilePath(apiKey) {
 }
 async function refreshBalanceCache(client) {
   try {
-    const { balance } = await client.getMe();
+    const { balance } = await client.getMe({ signal: AbortSignal.timeout(5000) });
     mkdirSync(IRONLABS_DIR, { recursive: true });
     writeFileSync(balanceCacheFilePath(client.apiKey), JSON.stringify({ balance, updated_at: Date.now() }));
   } catch {
@@ -163,11 +163,11 @@ var IronlabsClient = class {
   buildAuthHeaders() {
     return { Authorization: `Bearer ${this.apiKey}` };
   }
-  async request(method, path, body) {
+  async request(method, path, body, opts = {}) {
     const url = `${this.baseUrl}${path}`;
     const headers = { ...this.buildAuthHeaders() };
     if (body) headers["Content-Type"] = "application/json";
-    const resp = await fetch(url, { method, headers, body: body ? JSON.stringify(body) : void 0 });
+    const resp = await fetch(url, { method, headers, body: body ? JSON.stringify(body) : void 0, signal: opts.signal });
     if (resp.status === 401) throw new AuthError(await resp.json().catch(() => ({})));
     if (resp.status === 402) throw new InsufficientCreditError(await resp.json().catch(() => ({})));
     const data = await resp.json().catch(() => ({}));
@@ -210,8 +210,8 @@ var IronlabsClient = class {
     try { return JSON.parse(textContent.text); } catch { return { text: textContent.text }; }
   }
   // ---- Credit ----
-  async getMe() {
-    const data = await this.request("GET", "/chat/balance");
+  async getMe(opts = {}) {
+    const data = await this.request("GET", "/chat/balance", undefined, opts);
     const raw = data.data?.totalBalance ?? data.balance;
     if (raw == null) {
       throw new ApiError(500, data, "Balance response did not include a totalBalance value");

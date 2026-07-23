@@ -52,6 +52,7 @@ async function refreshBalanceCache() {
   try {
     const resp = await fetch(`${BASE_URL}/chat/balance`, {
       headers: { Authorization: `Bearer ${IRONLABS_API_KEY}` },
+      signal: AbortSignal.timeout(5000),
     });
     if (!resp.ok) return;
     const data = await resp.json();
