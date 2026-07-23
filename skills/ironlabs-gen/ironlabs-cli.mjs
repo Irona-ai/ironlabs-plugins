@@ -30,10 +30,28 @@ var InsufficientCreditError = class extends ApiError {
 import { mkdirSync, writeFileSync, readFileSync, readdirSync, unlinkSync } from "fs";
 import { join } from "path";
 import os from "os";
+import crypto from "crypto";
 
 const IRONLABS_DIR = join(os.homedir(), ".ironlabs");
 const TASK_DIR = join(IRONLABS_DIR, "tasks");
 const MATERIAL_DIR = join(IRONLABS_DIR, "materials");
+
+// Mirrors src/credits-cache.ts's cacheFilePath() — same hash scheme, same file —
+// so a spend here is immediately visible to the statusLine's balance cache
+// instead of waiting out its 30s TTL.
+function balanceCacheFilePath(apiKey) {
+  const hash = crypto.createHash("sha256").update(apiKey).digest("hex").slice(0, 16);
+  return join(IRONLABS_DIR, `balance-cache-${hash}.json`);
+}
+async function refreshBalanceCache(client) {
+  try {
+    const { balance } = await client.getMe();
+    mkdirSync(IRONLABS_DIR, { recursive: true });
+    writeFileSync(balanceCacheFilePath(client.apiKey), JSON.stringify({ balance, updated_at: Date.now() }));
+  } catch {
+    // Best-effort — a stale statusLine cache for a bit isn't fatal.
+  }
+}
 
 // Monotonic ID generator: Date.now() alone collides when multiple
 // tasks/materials are created within the same millisecond (e.g. Promise.all
@@ -277,6 +295,7 @@ var IronlabsClient = class {
         imageUrl = imgPart?.image_url?.url ?? null;
       }
       if (!imageUrl) throw new ApiError(500, orResult, "OpenRouter connector did not return an image");
+      await refreshBalanceCache(this);
       const stored = {
         taskId, status: "completed",
         model, prompt: params.prompt,
@@ -311,6 +330,7 @@ var IronlabsClient = class {
       const submitResult = await this.mcpCall("openrouter", "video_submit", orArgs);
       const generationId = submitResult.id;
       if (!generationId) throw new ApiError(500, submitResult, "OpenRouter connector did not return a generation id");
+      await refreshBalanceCache(this);
       const stored = {
         taskId, status: "pending",
         model, prompt: params.prompt,
@@ -360,6 +380,7 @@ var IronlabsClient = class {
         result.videoUrl = poll.unsigned_urls?.[0] || null;
         result.orResult = poll;
         writeTask(id, result);
+        await refreshBalanceCache(this);
         return result;
       }
       if (poll.status === "failed") {
@@ -795,6 +816,8 @@ async function taskChain(client, positional) {
     const dlResult = await client.mcpCall("openrouter", "video_download", { url });
     if (!dlResult.data_base64) throw new Error("video_download returned no data");
     arrayBuf = Buffer.from(dlResult.data_base64, "base64");
+    // video_download hits the same billable connector as generation — refresh in case it's metered too.
+    await refreshBalanceCache(client);
   } else {
     const resp = await fetch(url);
     if (!resp.ok) throw new Error(`Download failed: ${resp.status}`);

@@ -65,8 +65,8 @@ async function main() {
   // Run previous statusLine command if configured (e.g. claude-hud)
   const previousOutput = runPreviousStatusLine(stdinData)
 
-  // Get balance from local file cache (fast, no network)
-  const { data, fresh } = getBalance()
+  // Get balance from local file cache (fast, no network), namespaced to the active API key
+  const { data, fresh } = getBalance(process.env.IRONLABS_API_KEY)
 
   // If cache is stale or empty, fire async refresh (non-blocking)
   if (!fresh) {
