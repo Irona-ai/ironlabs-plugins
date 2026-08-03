@@ -68,7 +68,8 @@ async function main() {
   // Fetch live balance from the API on every render (no local caching)
   const data = await fetchBalance().catch(() => null)
 
-  const balanceLine = renderCreditsLine(data)
+  const configured = Boolean(process.env.IRONLABS_API_KEY)
+  const balanceLine = renderCreditsLine(data, configured)
 
   // Merge: previous statusLine output first, then balance line
   if (previousOutput) {

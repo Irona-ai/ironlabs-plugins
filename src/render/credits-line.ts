@@ -35,13 +35,17 @@ export interface RenderOptions {
 // ── Main Renderer ────────────────────────────────────────────────────────
 export function renderCreditsLine(
   data: BalanceData | null,
+  configured: boolean,
   opts: RenderOptions = {},
 ): string {
   const addCreditsCmd = opts.addCreditsCmd ?? '/ironlabs:add-credits'
   const setupCmd      = opts.setupCmd      ?? '/ironlabs:setup'
 
   if (!data) {
-    return colorize(`IronLabs — type ${setupCmd} to complete setup`, GRAY)
+    if (!configured) {
+      return colorize(`IronLabs — type ${setupCmd} to complete setup`, GRAY)
+    }
+    return colorize(`IronLabs — balance temporarily unavailable`, GRAY)
   }
 
   const { balance } = data
