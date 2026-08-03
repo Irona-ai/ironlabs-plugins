@@ -13,7 +13,7 @@ import fs from 'fs'
 import path from 'path'
 import os from 'os'
 import { execSync } from 'child_process'
-import { getBalance, refreshFromApi } from './credits-cache.js'
+import { fetchBalance } from './credits-cache.js'
 import { renderCreditsLine } from './render/credits-line.js'
 
 const PREVIOUS_STATUSLINE_FILE = path.join(os.homedir(), '.ironlabs/previous-statusline.json')
@@ -65,13 +65,8 @@ async function main() {
   // Run previous statusLine command if configured (e.g. claude-hud)
   const previousOutput = runPreviousStatusLine(stdinData)
 
-  // Get balance from local file cache (fast, no network)
-  const { data, fresh } = getBalance()
-
-  // If cache is stale or empty, fire async refresh (non-blocking)
-  if (!fresh) {
-    refreshFromApi().catch(() => {})
-  }
+  // Fetch live balance from the API on every render (no local caching)
+  const data = await fetchBalance().catch(() => null)
 
   const balanceLine = renderCreditsLine(data)
 
