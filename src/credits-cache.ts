@@ -8,6 +8,10 @@ export interface BalanceData {
   updated_at: number // Unix timestamp in ms
 }
 
+export function isConfigured(): boolean {
+  return Boolean(process.env.IRONLABS_API_KEY)
+}
+
 export async function fetchBalance(): Promise<BalanceData | null> {
   const apiKey = process.env.IRONLABS_API_KEY
   if (!apiKey) return null
@@ -19,7 +23,10 @@ export async function fetchBalance(): Promise<BalanceData | null> {
       headers: { Authorization: `Bearer ${apiKey}` },
       signal: AbortSignal.timeout(5000),
     })
-    if (!res.ok) return null
+    if (!res.ok) {
+      console.error(`[ironlabs] balance fetch failed: HTTP ${res.status}`)
+      return null
+    }
 
     const json = await res.json() as {
       data?: { totalBalance?: string | number },
@@ -29,11 +36,15 @@ export async function fetchBalance(): Promise<BalanceData | null> {
     const raw = json.data?.totalBalance ?? json.balance
     const dollars = typeof raw === 'string' ? parseFloat(raw) : raw
 
-    if (typeof dollars !== 'number' || Number.isNaN(dollars)) return null
+    if (typeof dollars !== 'number' || Number.isNaN(dollars)) {
+      console.error('[ironlabs] balance fetch failed: invalid balance in response')
+      return null
+    }
 
     // totalBalance is denominated in dollars — convert to cents to match BalanceData's contract.
     return { balance: Math.round(dollars * 100), updated_at: Date.now() }
-  } catch {
+  } catch (err) {
+    console.error('[ironlabs] balance fetch failed:', err)
     return null
   }
 }

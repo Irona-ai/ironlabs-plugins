@@ -13,7 +13,7 @@ import fs from 'fs'
 import path from 'path'
 import os from 'os'
 import { execSync } from 'child_process'
-import { fetchBalance } from './credits-cache.js'
+import { fetchBalance, isConfigured } from './credits-cache.js'
 import { renderCreditsLine } from './render/credits-line.js'
 
 const PREVIOUS_STATUSLINE_FILE = path.join(os.homedir(), '.ironlabs/previous-statusline.json')
@@ -68,7 +68,7 @@ async function main() {
   // Fetch live balance from the API on every render (no local caching)
   const data = await fetchBalance().catch(() => null)
 
-  const configured = Boolean(process.env.IRONLABS_API_KEY)
+  const configured = isConfigured()
   const balanceLine = renderCreditsLine(data, configured)
 
   // Merge: previous statusLine output first, then balance line
