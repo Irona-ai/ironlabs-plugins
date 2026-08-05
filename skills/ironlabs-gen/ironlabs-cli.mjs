@@ -43,6 +43,7 @@ function balanceCacheFilePath(apiKey) {
   const hash = crypto.createHash("sha256").update(apiKey).digest("hex").slice(0, 16);
   return join(IRONLABS_DIR, `balance-cache-${hash}.json`);
 }
+// Display-only — never used for spend authorization.
 async function refreshBalanceCache(client) {
   try {
     const { balance } = await client.getMe({ signal: AbortSignal.timeout(5000) });

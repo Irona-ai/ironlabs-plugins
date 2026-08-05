@@ -48,6 +48,7 @@ const MAX_INLINE_SIZE = 20 * 1024 * 1024; // 20MB
 // statusLine's balance cache instead of waiting out its 30s TTL. It's unconfirmed
 // whether /chat/completions debits the same balance as /chat/balance; refreshing
 // here is a harmless no-op read if it doesn't.
+// Display-only — never used for spend authorization.
 async function refreshBalanceCache() {
   try {
     const resp = await fetch(`${BASE_URL}/chat/balance`, {

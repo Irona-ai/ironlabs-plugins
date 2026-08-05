@@ -39,6 +39,7 @@ export function isCacheFresh(data: BalanceData, ttlMs: number = DEFAULT_TTL_MS):
   return Date.now() - data.updated_at < ttlMs
 }
 
+// Display-only — never used for spend authorization.
 export function writeCache(apiKey: string, balance: number): void {
   const data: BalanceData = { balance, updated_at: Date.now() }
   try {
