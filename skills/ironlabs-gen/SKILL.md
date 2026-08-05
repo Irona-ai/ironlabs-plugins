@@ -127,7 +127,7 @@ node ${CLAUDE_SKILL_DIR}/ironlabs-cli.mjs task generate \
 
 ## Material Pool (Batch Ingest)
 
-Scan a folder, analyze with Gemini (native via Irona's LLM gateway — no OpenRouter connector), output `material-pool.json`:
+Scan a folder, analyze with visual analysis (native via Irona's LLM gateway — no OpenRouter connector), output `material-pool.json`:
 
 ```bash
 node ${CLAUDE_SKILL_DIR}/scripts/material-ingest.mjs ./materials/

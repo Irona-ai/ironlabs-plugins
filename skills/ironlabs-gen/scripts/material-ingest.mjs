@@ -3,7 +3,7 @@
 /**
  * Material Ingest — Batch local analysis + AI auto-tagging for video production.
  *
- * Scans a directory (or file list), analyzes each with Gemini (via Irona
+ * Scans a directory (or file list), analyzes each with visual analysis (via Irona
  * LLM gateway), and writes material-pool.json with local file paths.
  *
  * Usage:
@@ -13,7 +13,7 @@
  *   node material-ingest.mjs ./materials/ --skip-analysis
  *
  * Environment:
- *   IRONLABS_API_KEY   Required (for Gemini analysis via Irona gateway)
+ *   IRONLABS_API_KEY   Required (for visual analysis via Irona gateway)
  *   IRONLABS_BASE_URL  Optional (default: https://www.chat.ironlabs.ai/)
  */
 
@@ -123,7 +123,7 @@ Usage:
 
 Options:
   --output, -o <file>   Output file path (default: material-pool.json)
-  --skip-analysis       Skip Gemini analysis, use defaults
+  --skip-analysis       Skip visual analysis, use defaults
   --append              Append to existing pool file`);
     process.exit(0);
   }
@@ -149,7 +149,7 @@ Options:
 
   const materials = [];
   if (args.skipAnalysis) {
-    console.log("⏭️  Skipping Gemini analysis (--skip-analysis).\n");
+    console.log("⏭️  Skipping visual analysis (--skip-analysis).\n");
     for (const r of registered) {
       materials.push({
         id: r.id,
@@ -164,7 +164,7 @@ Options:
       });
     }
   } else {
-    console.log("🔍 Analyzing files with Gemini (Irona gateway)...\n");
+    console.log("🔍 Analyzing files with visual analysis (Irona gateway)...\n");
     for (const r of registered) {
       process.stdout.write(`  Analyzing ${path.basename(r.file)}... `);
       const analysis = analyzeFile(r.file);

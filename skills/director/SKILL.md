@@ -62,7 +62,7 @@ Don't guess — ask. Every detail the user confirms is one fewer reason to regen
 - Key selling points (what makes it special?)
 - Target audience / platform (TikTok vertical? YouTube horizontal?)
 
-When the user provides a product image, **always run Gemini analysis first** before writing the prompt:
+When the user provides a product image, **always run visual analysis first** before writing the prompt:
 ```bash
 node ${CLAUDE_PLUGIN_ROOT}/skills/visual-analysis/scripts/analyze.mjs \
   --file <product-image> --mode product
@@ -95,10 +95,10 @@ User brief → [Clarify if needed] → Write prompt → Confirm → Generate
 ### Path 2: E-commerce / Product Clip (15s, 9:16)
 
 ```
-Product image → Gemini analysis → Upload material → Write prompt → Generate
+Product image → visual analysis → Upload material → Write prompt → Generate
 ```
 
-1. **Analyze product** with Gemini (native via Irona gateway — no OpenRouter connector):
+1. **Analyze product** with visual analysis (native via Irona gateway — no OpenRouter connector):
 ```bash
 node ${CLAUDE_PLUGIN_ROOT}/skills/visual-analysis/scripts/analyze.mjs \
   --file <product-image> --mode product

@@ -16,7 +16,7 @@ metadata:
 
 # Visual Analysis — Visual Understanding & Multimodal Analysis
 
-Multimodal analysis via Irona's LLM gateway (currently backed by Gemini 2.5 Flash — the underlying
+Multimodal analysis via Irona's LLM gateway (currently backed by Gemini 3.5 Flash — the underlying
 model can change without affecting this skill's interface). Zero npm dependencies, native `fetch` only.
 Handles images and videos (≤20MB inline). Files > 20MB: extract frames first.
 
