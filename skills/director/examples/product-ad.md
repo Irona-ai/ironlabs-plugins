@@ -8,7 +8,7 @@
 ## Step 1 — Product Analysis
 
 ```bash
-node ${CLAUDE_PLUGIN_ROOT}/skills/gemini-gen/scripts/gemini.mjs \
+node ${CLAUDE_PLUGIN_ROOT}/skills/visual-analysis/scripts/analyze.mjs \
   --file product.jpg --mode product
 ```
 

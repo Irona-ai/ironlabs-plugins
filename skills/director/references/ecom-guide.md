@@ -139,7 +139,7 @@ Background music: [genre/mood], [tempo], [energy level].
 CLI=${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/ironlabs-cli.mjs
 
 # Analyze product image first
-node ${CLAUDE_PLUGIN_ROOT}/skills/gemini-gen/scripts/gemini.mjs \
+node ${CLAUDE_PLUGIN_ROOT}/skills/visual-analysis/scripts/analyze.mjs \
   --file product.jpg --mode product
 
 # Upload the product image, then generate

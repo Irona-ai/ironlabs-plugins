@@ -1,8 +1,8 @@
 ---
-name: gemini-gen
+name: visual-analysis
 description: >
   Visual understanding and multimodal analysis via Irona's LLM gateway
-  (gemini-3.5-flash — no OpenRouter connector required). Handles product analysis,
+  (no OpenRouter connector required). Handles product analysis,
   video script extraction, and style analysis from images and videos.
   Backend: POST /api/v1/chat/completions (SSE).
   Do NOT use for generating images or videos — use ironlabs-gen for that.
@@ -11,12 +11,13 @@ metadata:
   author: ironlabs
   version: 0.2.1
   category: video-production
-  tags: [gemini, vision, multimodal, analysis]
+  tags: [vision, multimodal, analysis]
 ---
 
-# Gemini Gen — Visual Understanding & Multimodal Analysis
+# Visual Analysis — Visual Understanding & Multimodal Analysis
 
-Gemini 2.5 Flash via Irona's LLM gateway. Zero npm dependencies, native `fetch` only.
+Multimodal analysis via Irona's LLM gateway (currently backed by Gemini 2.5 Flash — the underlying
+model can change without affecting this skill's interface). Zero npm dependencies, native `fetch` only.
 Handles images and videos (≤20MB inline). Files > 20MB: extract frames first.
 
 **Auth**: `IRONLABS_API_KEY`. Get one at https://studio.ironlabs.ai → API Keys.
@@ -26,7 +27,7 @@ Handles images and videos (≤20MB inline). Files > 20MB: extract frames first.
 ### Mode 1 — File path (runs the script)
 When the user provides a local file path, run the script directly:
 ```bash
-node ${CLAUDE_SKILL_DIR}/scripts/gemini.mjs --file /path/to/image.jpg --mode product
+node ${CLAUDE_SKILL_DIR}/scripts/analyze.mjs --file /path/to/image.jpg --mode product
 ```
 
 ### Mode 2 — Pasted image (use your own vision)
@@ -40,19 +41,19 @@ text for `video-script`). Do NOT ask the user to save the file first.
 
 ```bash
 # Analyze a product photo from a file
-node ${CLAUDE_SKILL_DIR}/scripts/gemini.mjs --file photo.jpg --mode product
+node ${CLAUDE_SKILL_DIR}/scripts/analyze.mjs --file photo.jpg --mode product
 
 # Analyze from a base64 data URI (programmatic / script-to-script use)
-node ${CLAUDE_SKILL_DIR}/scripts/gemini.mjs --data-uri "data:image/jpeg;base64,..." --mode product
+node ${CLAUDE_SKILL_DIR}/scripts/analyze.mjs --data-uri "data:image/jpeg;base64,..." --mode product
 
 # Extract a video script with timestamps
-node ${CLAUDE_SKILL_DIR}/scripts/gemini.mjs --file clip.mp4 --mode video-script
+node ${CLAUDE_SKILL_DIR}/scripts/analyze.mjs --file clip.mp4 --mode video-script
 
 # Extract visual style keywords from a reference
-node ${CLAUDE_SKILL_DIR}/scripts/gemini.mjs --file reference.jpg --mode style
+node ${CLAUDE_SKILL_DIR}/scripts/analyze.mjs --file reference.jpg --mode style
 
 # Free-form analysis
-node ${CLAUDE_SKILL_DIR}/scripts/gemini.mjs --file photo.jpg "Describe this image in detail"
+node ${CLAUDE_SKILL_DIR}/scripts/analyze.mjs --file photo.jpg "Describe this image in detail"
 ```
 
 ## Analysis Modes
@@ -62,7 +63,7 @@ node ${CLAUDE_SKILL_DIR}/scripts/gemini.mjs --file photo.jpg "Describe this imag
 Returns structured JSON with type, color, material, selling points, brand tone, and scene suggestions.
 
 ```bash
-node ${CLAUDE_SKILL_DIR}/scripts/gemini.mjs --file product.jpg --mode product
+node ${CLAUDE_SKILL_DIR}/scripts/analyze.mjs --file product.jpg --mode product
 ```
 
 Output:
@@ -82,7 +83,7 @@ Output:
 Watches a video and outputs timestamped dialogue, scene descriptions, and camera movements.
 
 ```bash
-node ${CLAUDE_SKILL_DIR}/scripts/gemini.mjs --file clip.mp4 --mode video-script
+node ${CLAUDE_SKILL_DIR}/scripts/analyze.mjs --file clip.mp4 --mode video-script
 ```
 
 ### Style Extraction (`--mode style`)
@@ -90,26 +91,26 @@ node ${CLAUDE_SKILL_DIR}/scripts/gemini.mjs --file clip.mp4 --mode video-script
 Extracts color palette, lighting, camera language, composition, and mood.
 
 ```bash
-node ${CLAUDE_SKILL_DIR}/scripts/gemini.mjs --file reference.jpg --mode style
+node ${CLAUDE_SKILL_DIR}/scripts/analyze.mjs --file reference.jpg --mode style
 ```
 
 ## CLI Usage
 
 ```bash
 # Text only
-node ${CLAUDE_SKILL_DIR}/scripts/gemini.mjs "Explain quantum computing"
+node ${CLAUDE_SKILL_DIR}/scripts/analyze.mjs "Explain quantum computing"
 
 # Analyze an image from a file
-node ${CLAUDE_SKILL_DIR}/scripts/gemini.mjs --file photo.jpg "Describe this product"
+node ${CLAUDE_SKILL_DIR}/scripts/analyze.mjs --file photo.jpg "Describe this product"
 
 # Analyze an image from an inline base64 data URI (e.g. pasted in chat)
-node ${CLAUDE_SKILL_DIR}/scripts/gemini.mjs --data-uri "data:image/jpeg;base64,..." --mode product
+node ${CLAUDE_SKILL_DIR}/scripts/analyze.mjs --data-uri "data:image/jpeg;base64,..." --mode product
 
 # Multiple images
-node ${CLAUDE_SKILL_DIR}/scripts/gemini.mjs --file a.jpg --file b.jpg "Compare these two"
+node ${CLAUDE_SKILL_DIR}/scripts/analyze.mjs --file a.jpg --file b.jpg "Compare these two"
 
 # JSON output mode
-node ${CLAUDE_SKILL_DIR}/scripts/gemini.mjs --json "Return a JSON object with name and age"
+node ${CLAUDE_SKILL_DIR}/scripts/analyze.mjs --json "Return a JSON object with name and age"
 ```
 
 ### Options
@@ -129,11 +130,11 @@ node ${CLAUDE_SKILL_DIR}/scripts/gemini.mjs --json "Return a JSON object with na
 
 Files ≤20MB are sent inline as base64. For files >20MB (e.g., long videos):
 1. Extract key frames: `ffmpeg -i video.mp4 -vf "fps=1" frame_%04d.jpg`
-2. Analyze individual frames: `node gemini.mjs --file frame_0001.jpg --mode style`
+2. Analyze individual frames: `node analyze.mjs --file frame_0001.jpg --mode style`
 
 ## When to Use vs When Not
 
-| Use gemini-gen for | Use ironlabs-gen for |
+| Use visual-analysis for | Use ironlabs-gen for |
 |---|---|
 | Analyzing product photos | Generating images |
 | Understanding video content | Generating videos |
@@ -145,4 +146,4 @@ Files ≤20MB are sent inline as base64. For files >20MB (e.g., long videos):
 ## Authentication
 
 Environment variable `IRONLABS_API_KEY`. Get one at: https://studio.ironlabs.ai → API Keys.
-No external connectors required — Gemini routes through Irona's LLM gateway directly.
+No external connectors required — routes through Irona's LLM gateway directly.

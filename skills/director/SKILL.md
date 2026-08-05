@@ -64,7 +64,7 @@ Don't guess — ask. Every detail the user confirms is one fewer reason to regen
 
 When the user provides a product image, **always run Gemini analysis first** before writing the prompt:
 ```bash
-node ${CLAUDE_PLUGIN_ROOT}/skills/gemini-gen/scripts/gemini.mjs \
+node ${CLAUDE_PLUGIN_ROOT}/skills/visual-analysis/scripts/analyze.mjs \
   --file <product-image> --mode product
 ```
 This returns structured JSON (type, color, material, selling points, brand tone, scene suggestions).
@@ -100,7 +100,7 @@ Product image → Gemini analysis → Upload material → Write prompt → Gener
 
 1. **Analyze product** with Gemini (native via Irona gateway — no OpenRouter connector):
 ```bash
-node ${CLAUDE_PLUGIN_ROOT}/skills/gemini-gen/scripts/gemini.mjs \
+node ${CLAUDE_PLUGIN_ROOT}/skills/visual-analysis/scripts/analyze.mjs \
   --file <product-image> --mode product
 ```
 Use the returned JSON to populate selling points, model dialogue, and scene suggestions.

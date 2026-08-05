@@ -26,7 +26,7 @@ import { createHash } from "crypto";
 const __filename = fileURLToPath(import.meta.url);
 const __dir = path.dirname(__filename);
 
-const GEMINI_PATH = path.join(__dir, "..", "..", "gemini-gen", "scripts", "gemini.mjs");
+const VISUAL_ANALYSIS_PATH = path.join(__dir, "..", "..", "visual-analysis", "scripts", "analyze.mjs");
 
 const IMAGE_EXTS = new Set([".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".tiff"]);
 const VIDEO_EXTS = new Set([".mp4", ".mov", ".webm", ".mkv", ".avi"]);
@@ -97,7 +97,7 @@ Return ONLY valid JSON (no markdown fences) with these fields:
   try {
     const output = execFileSync(
       process.execPath,
-      [GEMINI_PATH, "--file", filePath, "--resolution", resolution, "--json", prompt],
+      [VISUAL_ANALYSIS_PATH, "--file", filePath, "--resolution", resolution, "--json", prompt],
       { encoding: "utf-8", timeout: 120000 }
     );
     const jsonMatch = output.match(/\{[\s\S]*\}/);
