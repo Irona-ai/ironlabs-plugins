@@ -130,7 +130,7 @@ node ${CLAUDE_SKILL_DIR}/scripts/analyze.mjs --json "Return a JSON object with n
 
 Files ≤20MB are sent inline as base64. For files >20MB (e.g., long videos):
 1. Extract key frames: `ffmpeg -i video.mp4 -vf "fps=1" frame_%04d.jpg`
-2. Analyze individual frames: `node analyze.mjs --file frame_0001.jpg --mode style`
+2. Analyze individual frames: `node ${CLAUDE_SKILL_DIR}/scripts/analyze.mjs --file frame_0001.jpg --mode style`
 
 ## When to Use vs When Not
 
