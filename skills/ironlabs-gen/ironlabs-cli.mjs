@@ -39,8 +39,15 @@ const MATERIAL_DIR = join(IRONLABS_DIR, "materials");
 // Mirrors src/credits-cache.ts's cacheFilePath() — same hash scheme, same file —
 // so a spend here is immediately visible to the statusLine's balance cache
 // instead of waiting out its 30s TTL.
+// Truncation length for the cache filename hash — keep in sync with
+// src/credits-cache.ts's HASH_LENGTH and gemini.mjs's refreshBalanceCache(),
+// or the caches silently diverge.
+const BALANCE_CACHE_HASH_LENGTH = 16;
+// Pre-per-key-scoping cache file, orphaned on disk after upgrading to the
+// per-key scheme below; cleaned up opportunistically.
+const LEGACY_BALANCE_CACHE_FILE = join(IRONLABS_DIR, "balance-cache.json");
 function balanceCacheFilePath(apiKey) {
-  const hash = crypto.createHash("sha256").update(apiKey).digest("hex").slice(0, 16);
+  const hash = crypto.createHash("sha256").update(apiKey).digest("hex").slice(0, BALANCE_CACHE_HASH_LENGTH);
   return join(IRONLABS_DIR, `balance-cache-${hash}.json`);
 }
 // Display-only — never used for spend authorization.
@@ -51,6 +58,11 @@ async function refreshBalanceCache(client) {
     writeFileSync(balanceCacheFilePath(client.apiKey), JSON.stringify({ balance, updated_at: Date.now() }));
   } catch {
     // Best-effort — a stale statusLine cache for a bit isn't fatal.
+  }
+  try {
+    unlinkSync(LEGACY_BALANCE_CACHE_FILE);
+  } catch {
+    // Already gone, or never existed — fine either way.
   }
 }
 
@@ -217,8 +229,8 @@ var IronlabsClient = class {
     if (raw == null) {
       throw new ApiError(500, data, "Balance response did not include a totalBalance value");
     }
-    const dollars = typeof raw === "string" ? parseFloat(raw) : raw;
-    if (typeof dollars !== "number" || Number.isNaN(dollars)) {
+    const dollars = typeof raw === "string" ? Number(raw) : raw;
+    if (typeof dollars !== "number" || !Number.isFinite(dollars)) {
       throw new ApiError(500, data, "Balance response did not include a valid totalBalance value");
     }
     // totalBalance is in dollars; normalize to cents.

@@ -14,13 +14,22 @@ import crypto from 'crypto'
 const CACHE_DIR = path.join(os.homedir(), '.ironlabs')
 const DEFAULT_TTL_MS = 30_000 // 30 seconds
 
+// Truncation length for the per-key cache filename hash. Mirrored in
+// ironlabs-cli.mjs's balanceCacheFilePath() and gemini.mjs's refreshBalanceCache()
+// — keep all three in sync if this ever changes, or the caches silently diverge.
+const HASH_LENGTH = 16
+
+// Pre-per-key-scoping cache file (unscoped, single file for all keys). Orphaned
+// on disk after upgrading to the per-key scheme below; cleaned up opportunistically.
+const LEGACY_CACHE_FILE = path.join(CACHE_DIR, 'balance-cache.json')
+
 export interface BalanceData {
   balance: number    // in cents
   updated_at: number // Unix timestamp in ms
 }
 
 function cacheFilePath(apiKey: string): string {
-  const hash = crypto.createHash('sha256').update(apiKey).digest('hex').slice(0, 16)
+  const hash = crypto.createHash('sha256').update(apiKey).digest('hex').slice(0, HASH_LENGTH)
   return path.join(CACHE_DIR, `balance-cache-${hash}.json`)
 }
 
@@ -47,6 +56,11 @@ export function writeCache(apiKey: string, balance: number): void {
     fs.writeFileSync(cacheFilePath(apiKey), JSON.stringify(data, null, 2), 'utf-8')
   } catch {
     // Silent fail — statusLine must never crash
+  }
+  try {
+    fs.unlinkSync(LEGACY_CACHE_FILE)
+  } catch {
+    // Already gone, or never existed — fine either way.
   }
 }
 
@@ -79,9 +93,9 @@ export async function refreshFromApi(): Promise<void> {
   }
 
   const raw = json.data?.totalBalance ?? json.balance
-  const dollars = typeof raw === 'string' ? parseFloat(raw) : raw
+  const dollars = typeof raw === 'string' ? Number(raw) : raw
 
-  if (typeof dollars === 'number' && !Number.isNaN(dollars)) {
+  if (typeof dollars === 'number' && Number.isFinite(dollars)) {
     // totalBalance is denominated in dollars — convert to cents to match BalanceData's contract.
     writeCache(apiKey, Math.round(dollars * 100))
   }
