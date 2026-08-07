@@ -28,7 +28,7 @@ Uses `ironlabs-cli.mjs` — same CLI interface as the IronLabs plugin, adapted f
 
 **Auth**: `IRONLABS_API_KEY`. Get one at https://studio.ironlabs.ai → API Keys.
 The **OpenRouter** external connector must be connected in IronLabs (**Settings → Connectors → OpenRouter**).
-Gemini analysis (material-ingest) shells out to `gemini-gen`'s script, which runs natively via Irona's LLM gateway — no OpenRouter connector or additional setup needed.
+Visual analysis (material-ingest) shells out to `visual-analysis`'s script, which runs natively via Irona's LLM gateway — no OpenRouter connector or additional setup needed.
 
 ---
 
@@ -54,7 +54,7 @@ node ${CLAUDE_SKILL_DIR}/ironlabs-cli.mjs task generate \
 
 ## Supported Models
 
-| Model alias | OpenRouter model | Type | Notes |
+| Model alias | Resolves to (implementation detail — may change) | Type | Notes |
 |-------------|-------------------|------|-------|
 | `ironlabs-2.0` | `x-ai/grok-imagine-video` | Video | Default video |
 | `ironlabs-2.0-fast` | `kwaivgi/kling-v3.0-pro` | Video | Fast video |
@@ -63,7 +63,7 @@ node ${CLAUDE_SKILL_DIR}/ironlabs-cli.mjs task generate \
 | `nano-banana-pro` | `google/gemini-3.1-flash-image-preview` | Image | Currently maps to the same model as `nano-banana-2` |
 | `midjourney-v7` | `google/gemini-3.1-flash-image-preview` | Image | Artistic |
 | `gpt-image-2` | `google/gemini-3.1-flash-image-preview` | Image | GPT-based |
-| *(any `provider/model` path)* | — | — | Pass an OpenRouter model path directly |
+| *(any `provider/model` path)* | — | — | Advanced: pass a raw provider/model path directly, bypassing the alias |
 
 ---
 
@@ -127,7 +127,7 @@ node ${CLAUDE_SKILL_DIR}/ironlabs-cli.mjs task generate \
 
 ## Material Pool (Batch Ingest)
 
-Scan a folder, analyze with Gemini (native via Irona's LLM gateway — no OpenRouter connector), output `material-pool.json`:
+Scan a folder, analyze with visual analysis (native via Irona's LLM gateway — no OpenRouter connector), output `material-pool.json`:
 
 ```bash
 node ${CLAUDE_SKILL_DIR}/scripts/material-ingest.mjs ./materials/

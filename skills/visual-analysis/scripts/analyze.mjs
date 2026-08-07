@@ -1,19 +1,20 @@
 #!/usr/bin/env node
 
 /**
- * Gemini analysis via Irona's LLM gateway (direct completions).
+ * Visual analysis via Irona's LLM gateway (direct completions).
  * Zero npm dependencies — uses native fetch.
  * Auth: IRONLABS_API_KEY → POST /api/v1/chat/completions (SSE)
- * Model: google/gemini-3.5-flash (provider/model format required by IronLab's completions gateway)
+ * Model: google/gemini-3.5-flash (provider/model format required by IronLab's completions gateway;
+ *   the underlying model may change without affecting this script's interface)
  *
  * Usage:
- *   node gemini.mjs "Explain quantum computing"
- *   node gemini.mjs --file photo.jpg "Describe this product"
- *   node gemini.mjs --file a.jpg --file b.jpg "Compare these two"
- *   node gemini.mjs --file photo.jpg --mode product
- *   node gemini.mjs --file clip.mp4 --mode video-script
- *   node gemini.mjs --file reference.jpg --mode style
- *   node gemini.mjs --json "Return a JSON object with name and age"
+ *   node analyze.mjs "Explain quantum computing"
+ *   node analyze.mjs --file photo.jpg "Describe this product"
+ *   node analyze.mjs --file a.jpg --file b.jpg "Compare these two"
+ *   node analyze.mjs --file photo.jpg --mode product
+ *   node analyze.mjs --file clip.mp4 --mode video-script
+ *   node analyze.mjs --file reference.jpg --mode style
+ *   node analyze.mjs --json "Return a JSON object with name and age"
  *
  * Options:
  *   --file <path>         Attach a local file (image/video). Repeatable. ≤20MB inline.
@@ -251,7 +252,7 @@ async function createConversation() {
   const resp = await fetch(`${BASE_URL}/chat/conversation`, {
     method: "POST",
     headers: { Authorization: `Bearer ${IRONLABS_API_KEY}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ title: "gemini-gen" }),
+    body: JSON.stringify({ title: "visual-analysis" }),
   });
   if (!resp.ok) {
     const body = await resp.text().catch(() => "(no body)");
@@ -320,7 +321,7 @@ async function main() {
   let opts = parseArgs(process.argv.slice(2));
 
   if (!opts.prompt && opts.files.length === 0 && opts.dataUris.length === 0 && !opts.mode) {
-    console.error(`Usage: node gemini.mjs [options] <prompt>
+    console.error(`Usage: node analyze.mjs [options] <prompt>
 
 Options:
   --file <path>         Attach local file (repeatable, ≤20MB inline)
@@ -335,11 +336,11 @@ Options:
 Requires: IRONLABS_API_KEY
 
 Examples:
-  node gemini.mjs --file photo.jpg --mode product
-  node gemini.mjs --data-uri "data:image/jpeg;base64,..." --mode product
-  node gemini.mjs --file clip.mp4 --mode video-script
-  node gemini.mjs --file ref.jpg --mode style
-  node gemini.mjs --file a.jpg --file b.jpg "Compare these two"`);
+  node analyze.mjs --file photo.jpg --mode product
+  node analyze.mjs --data-uri "data:image/jpeg;base64,..." --mode product
+  node analyze.mjs --file clip.mp4 --mode video-script
+  node analyze.mjs --file ref.jpg --mode style
+  node analyze.mjs --file a.jpg --file b.jpg "Compare these two"`);
     process.exit(1);
   }
 
