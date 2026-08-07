@@ -19,7 +19,10 @@ var InsufficientCreditError = class extends ApiError {
   available;
   required;
   constructor(body) {
-    super(402, body, `Insufficient credits: need ${body.required}, have ${body.available}`);
+    // Some backend paths (e.g. the MCP connector call) report insufficient balance as
+    // a preformatted string rather than structured {available, required} — honor it
+    // verbatim when present instead of rendering "need undefined, have undefined".
+    super(402, body, body.message || `Insufficient credits: need ${body.required}, have ${body.available}`);
     this.name = "InsufficientCreditError";
     this.available = body.available ?? 0;
     this.required = body.required ?? 0;
@@ -58,6 +61,7 @@ async function refreshBalanceCache(client) {
     writeFileSync(balanceCacheFilePath(client.apiKey), JSON.stringify({ balance, updated_at: Date.now() }));
   } catch {
     // Best-effort — a stale statusLine cache for a bit isn't fatal.
+    return;
   }
   try {
     unlinkSync(LEGACY_BALANCE_CACHE_FILE);
@@ -203,6 +207,12 @@ var IronlabsClient = class {
     });
     if (!resp.ok) {
       const err = await resp.json().catch(() => ({}));
+      if (resp.status === 402) {
+        throw new InsufficientCreditError({
+          available: err.available ?? err.error?.available,
+          required: err.required ?? err.error?.required,
+        });
+      }
       throw new ApiError(resp.status, err, err.error?.message || err.message);
     }
     const contentType = resp.headers.get("content-type") ?? "";
@@ -220,13 +230,24 @@ var IronlabsClient = class {
     if (!content?.length) throw new ApiError(500, {}, "Empty MCP response");
     const textContent = content.find(c => c.type === "text");
     if (!textContent) throw new ApiError(500, {}, "No text content in MCP response");
+    // The backend enforces the balance check inside the tool call itself and reports a
+    // rejection as a normal 200 response with isError:true (MCP protocol), not an HTTP
+    // 402 — the `!resp.ok` branch above never sees it. Without this check, an
+    // insufficient-balance rejection here silently looks like a successful call whose
+    // JSON.parse just happened to fail.
+    if (result.result?.isError) {
+      if (/insufficient balance/i.test(textContent.text)) {
+        throw new InsufficientCreditError({ message: textContent.text });
+      }
+      throw new ApiError(502, result.result, textContent.text);
+    }
     try { return JSON.parse(textContent.text); } catch { return { text: textContent.text }; }
   }
   // ---- Credit ----
   async getMe(opts = {}) {
     const data = await this.request("GET", "/chat/balance", undefined, opts);
     const raw = data.data?.totalBalance ?? data.balance;
-    if (raw == null) {
+    if (raw == null || (typeof raw === "string" && raw.trim() === "")) {
       throw new ApiError(500, data, "Balance response did not include a totalBalance value");
     }
     const dollars = typeof raw === "string" ? Number(raw) : raw;
@@ -1136,7 +1157,11 @@ async function main() {
     }
     if (e instanceof InsufficientCreditError) {
       console.error(`Credit Error: ${e.message}`);
-      console.error(`  Available: ${e.available}, Required: ${e.required}`);
+      // Some rejections (e.g. from the MCP connector call) only carry a preformatted
+      // message, not a numeric breakdown — skip the redundant "0, 0" line then.
+      if (e.available || e.required) {
+        console.error(`  Available: ${e.available}, Required: ${e.required}`);
+      }
       process.exit(1);
     }
     if (e instanceof ApiError) {

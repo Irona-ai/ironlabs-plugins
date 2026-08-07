@@ -56,6 +56,7 @@ export function writeCache(apiKey: string, balance: number): void {
     fs.writeFileSync(cacheFilePath(apiKey), JSON.stringify(data, null, 2), 'utf-8')
   } catch {
     // Silent fail — statusLine must never crash
+    return
   }
   try {
     fs.unlinkSync(LEGACY_CACHE_FILE)
@@ -93,7 +94,7 @@ export async function refreshFromApi(): Promise<void> {
   }
 
   const raw = json.data?.totalBalance ?? json.balance
-  const dollars = typeof raw === 'string' ? Number(raw) : raw
+  const dollars = typeof raw === 'string' ? (raw.trim() === '' ? NaN : Number(raw)) : raw
 
   if (typeof dollars === 'number' && Number.isFinite(dollars)) {
     // totalBalance is denominated in dollars — convert to cents to match BalanceData's contract.

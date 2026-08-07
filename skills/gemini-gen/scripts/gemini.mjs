@@ -62,6 +62,7 @@ async function refreshBalanceCache() {
     if (!resp.ok) return;
     const data = await resp.json();
     const raw = data.data?.totalBalance ?? data.balance;
+    if (typeof raw === "string" && raw.trim() === "") return;
     const dollars = typeof raw === "string" ? Number(raw) : raw;
     if (typeof dollars !== "number" || !Number.isFinite(dollars)) return;
     const balance = Math.round(dollars * 100);
@@ -74,15 +75,15 @@ async function refreshBalanceCache() {
     );
   } catch {
     // Best-effort — a stale statusLine cache for a bit isn't fatal.
-  } finally {
-    // Pre-per-key-scoping cache file, orphaned on disk after upgrading to the
-    // per-key scheme above; cleaned up opportunistically. In `finally` so it
-    // still runs on the early returns above (bad response, invalid balance).
-    try {
-      await fs.unlink(path.join(os.homedir(), ".ironlabs", "balance-cache.json"));
-    } catch {
-      // Already gone, or never existed — fine either way.
-    }
+    return;
+  }
+  // Pre-per-key-scoping cache file, orphaned on disk after upgrading to the
+  // per-key scheme above; cleaned up opportunistically. Only reached once the
+  // keyed write above has actually succeeded.
+  try {
+    await fs.unlink(path.join(os.homedir(), ".ironlabs", "balance-cache.json"));
+  } catch {
+    // Already gone, or never existed — fine either way.
   }
 }
 
