@@ -32,6 +32,8 @@
 
 import fs from "fs/promises";
 import path from "path";
+import os from "os";
+import crypto from "crypto";
 
 const IRONLABS_API_KEY = process.env.IRONLABS_API_KEY;
 if (!IRONLABS_API_KEY) {
@@ -41,6 +43,50 @@ if (!IRONLABS_API_KEY) {
 
 const BASE_URL = (process.env.IRONLABS_BASE_URL || "https://www.chat.ironlabs.ai/api/v1").replace(/\/$/, "");
 const MAX_INLINE_SIZE = 20 * 1024 * 1024; // 20MB
+
+// Mirrors src/credits-cache.ts's cacheFilePath() / ironlabs-cli.mjs's balanceCacheFilePath()
+// — same hash scheme, same file — so a call here is immediately visible to the
+// statusLine's balance cache instead of waiting out its 30s TTL. It's unconfirmed
+// whether /chat/completions debits the same balance as /chat/balance; refreshing
+// here is a harmless no-op read if it doesn't.
+// Truncation length for the cache filename hash — keep in sync with
+// src/credits-cache.ts's HASH_LENGTH and ironlabs-cli.mjs's BALANCE_CACHE_HASH_LENGTH,
+// or the caches silently diverge.
+const BALANCE_CACHE_HASH_LENGTH = 16;
+// Display-only — never used for spend authorization.
+async function refreshBalanceCache() {
+  try {
+    const resp = await fetch(`${BASE_URL}/chat/balance`, {
+      headers: { Authorization: `Bearer ${IRONLABS_API_KEY}` },
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!resp.ok) return;
+    const data = await resp.json();
+    const raw = data.data?.totalBalance ?? data.balance;
+    if (typeof raw === "string" && raw.trim() === "") return;
+    const dollars = typeof raw === "string" ? Number(raw) : raw;
+    if (typeof dollars !== "number" || !Number.isFinite(dollars)) return;
+    const balance = Math.round(dollars * 100);
+    const hash = crypto.createHash("sha256").update(IRONLABS_API_KEY).digest("hex").slice(0, BALANCE_CACHE_HASH_LENGTH);
+    const cacheDir = path.join(os.homedir(), ".ironlabs");
+    await fs.mkdir(cacheDir, { recursive: true });
+    await fs.writeFile(
+      path.join(cacheDir, `balance-cache-${hash}.json`),
+      JSON.stringify({ balance, updated_at: Date.now() }),
+    );
+  } catch {
+    // Best-effort — a stale statusLine cache for a bit isn't fatal.
+    return;
+  }
+  // Pre-per-key-scoping cache file, orphaned on disk after upgrading to the
+  // per-key scheme above; cleaned up opportunistically. Only reached once the
+  // keyed write above has actually succeeded.
+  try {
+    await fs.unlink(path.join(os.homedir(), ".ironlabs", "balance-cache.json"));
+  } catch {
+    // Already gone, or never existed — fine either way.
+  }
+}
 
 const MIME_MAP = {
   ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
@@ -331,6 +377,7 @@ Examples:
 
   console.error(`Calling ${opts.model} via Irona gateway...`);
   const text = await callCompletions(messages, opts.model);
+  await refreshBalanceCache();
 
   console.log(text);
 }

@@ -19,7 +19,10 @@ var InsufficientCreditError = class extends ApiError {
   available;
   required;
   constructor(body) {
-    super(402, body, `Insufficient credits: need ${body.required}, have ${body.available}`);
+    // Some backend paths (e.g. the MCP connector call) report insufficient balance as
+    // a preformatted string rather than structured {available, required} — honor it
+    // verbatim when present instead of rendering "need undefined, have undefined".
+    super(402, body, body.message || `Insufficient credits: need ${body.required}, have ${body.available}`);
     this.name = "InsufficientCreditError";
     this.available = body.available ?? 0;
     this.required = body.required ?? 0;
@@ -30,10 +33,42 @@ var InsufficientCreditError = class extends ApiError {
 import { mkdirSync, writeFileSync, readFileSync, readdirSync, unlinkSync } from "fs";
 import { join } from "path";
 import os from "os";
+import crypto from "crypto";
 
 const IRONLABS_DIR = join(os.homedir(), ".ironlabs");
 const TASK_DIR = join(IRONLABS_DIR, "tasks");
 const MATERIAL_DIR = join(IRONLABS_DIR, "materials");
+
+// Mirrors src/credits-cache.ts's cacheFilePath() — same hash scheme, same file —
+// so a spend here is immediately visible to the statusLine's balance cache
+// instead of waiting out its 30s TTL.
+// Truncation length for the cache filename hash — keep in sync with
+// src/credits-cache.ts's HASH_LENGTH and gemini.mjs's refreshBalanceCache(),
+// or the caches silently diverge.
+const BALANCE_CACHE_HASH_LENGTH = 16;
+// Pre-per-key-scoping cache file, orphaned on disk after upgrading to the
+// per-key scheme below; cleaned up opportunistically.
+const LEGACY_BALANCE_CACHE_FILE = join(IRONLABS_DIR, "balance-cache.json");
+function balanceCacheFilePath(apiKey) {
+  const hash = crypto.createHash("sha256").update(apiKey).digest("hex").slice(0, BALANCE_CACHE_HASH_LENGTH);
+  return join(IRONLABS_DIR, `balance-cache-${hash}.json`);
+}
+// Display-only — never used for spend authorization.
+async function refreshBalanceCache(client) {
+  try {
+    const { balance } = await client.getMe({ signal: AbortSignal.timeout(5000) });
+    mkdirSync(IRONLABS_DIR, { recursive: true });
+    writeFileSync(balanceCacheFilePath(client.apiKey), JSON.stringify({ balance, updated_at: Date.now() }));
+  } catch {
+    // Best-effort — a stale statusLine cache for a bit isn't fatal.
+    return;
+  }
+  try {
+    unlinkSync(LEGACY_BALANCE_CACHE_FILE);
+  } catch {
+    // Already gone, or never existed — fine either way.
+  }
+}
 
 // Monotonic ID generator: Date.now() alone collides when multiple
 // tasks/materials are created within the same millisecond (e.g. Promise.all
@@ -159,11 +194,11 @@ var IronlabsClient = class {
   buildAuthHeaders() {
     return { Authorization: `Bearer ${this.apiKey}` };
   }
-  async request(method, path, body) {
+  async request(method, path, body, opts = {}) {
     const url = `${this.baseUrl}${path}`;
     const headers = { ...this.buildAuthHeaders() };
     if (body) headers["Content-Type"] = "application/json";
-    const resp = await fetch(url, { method, headers, body: body ? JSON.stringify(body) : void 0 });
+    const resp = await fetch(url, { method, headers, body: body ? JSON.stringify(body) : void 0, signal: opts.signal });
     if (resp.status === 401) throw new AuthError(await resp.json().catch(() => ({})));
     if (resp.status === 402) throw new InsufficientCreditError(await resp.json().catch(() => ({})));
     const data = await resp.json().catch(() => ({}));
@@ -186,6 +221,13 @@ var IronlabsClient = class {
     });
     if (!resp.ok) {
       const err = await resp.json().catch(() => ({}));
+      if (resp.status === 402) {
+        throw new InsufficientCreditError({
+          available: err.available ?? err.error?.available,
+          required: err.required ?? err.error?.required,
+          message: err.message || err.error?.message,
+        });
+      }
       throw new ApiError(resp.status, err, err.error?.message || err.message);
     }
     const contentType = resp.headers.get("content-type") ?? "";
@@ -203,24 +245,39 @@ var IronlabsClient = class {
     if (!content?.length) throw new ApiError(500, {}, "Empty MCP response");
     const textContent = content.find(c => c.type === "text");
     if (!textContent) throw new ApiError(500, {}, "No text content in MCP response");
-    // Tool-level failures (e.g. "missing required argument", "prompt exceeds
-    // the maximum allowed length") come back as isError:true with the real
-    // reason in textContent.text — surface it directly instead of letting it
-    // fall through to the JSON.parse fallback below, which would silently
-    // wrap it as { text: ... } and produce a misleading generic error
-    // downstream (e.g. "did not return a generation id").
-    if (result.result?.isError) throw new ApiError(400, result.result, textContent.text);
+    // The backend enforces the balance check inside the tool call itself and reports a
+    // rejection as a normal 200 response with isError:true (MCP protocol), not an HTTP
+    // 402 — the `!resp.ok` branch above never sees it. Without this check, an
+    // insufficient-balance rejection here silently looks like a successful call whose
+    // JSON.parse just happened to fail.
+    if (result.result?.isError) {
+      // Matches the wording the backend actually throws today (InsufficientBalanceError:
+      // "Insufficient balance: current=... cents, ...") plus plausible variants ("insufficient
+      // credits", "insufficient funds") in case that phrasing drifts — this is plain text
+      // extracted from a rendered error message, not a structured field, so it's matched
+      // loosely on purpose rather than pinned to one exact string.
+      if (/insufficient (balance|credits?|funds)/i.test(textContent.text)) {
+        throw new InsufficientCreditError({ message: textContent.text });
+      }
+      // Tool-level failures (e.g. "missing required argument", "prompt exceeds
+      // the maximum allowed length") come back as isError:true with the real
+      // reason in textContent.text — surface it directly instead of letting it
+      // fall through to the JSON.parse fallback below, which would silently
+      // wrap it as { text: ... } and produce a misleading generic error
+      // downstream (e.g. "did not return a generation id").
+      throw new ApiError(400, result.result, textContent.text);
+    }
     try { return JSON.parse(textContent.text); } catch { return { text: textContent.text }; }
   }
   // ---- Credit ----
-  async getMe() {
-    const data = await this.request("GET", "/chat/balance");
+  async getMe(opts = {}) {
+    const data = await this.request("GET", "/chat/balance", undefined, opts);
     const raw = data.data?.totalBalance ?? data.balance;
-    if (raw == null) {
+    if (raw == null || (typeof raw === "string" && raw.trim() === "")) {
       throw new ApiError(500, data, "Balance response did not include a totalBalance value");
     }
-    const dollars = typeof raw === "string" ? parseFloat(raw) : raw;
-    if (typeof dollars !== "number" || Number.isNaN(dollars)) {
+    const dollars = typeof raw === "string" ? Number(raw) : raw;
+    if (typeof dollars !== "number" || !Number.isFinite(dollars)) {
       throw new ApiError(500, data, "Balance response did not include a valid totalBalance value");
     }
     // totalBalance is in dollars; normalize to cents.
@@ -314,6 +371,7 @@ var IronlabsClient = class {
         imageUrl = imgPart?.image_url?.url ?? null;
       }
       if (!imageUrl) throw new ApiError(500, orResult, "OpenRouter connector did not return an image");
+      await refreshBalanceCache(this);
       const stored = {
         taskId, status: "completed",
         model, prompt: params.prompt,
@@ -380,6 +438,7 @@ var IronlabsClient = class {
       const submitResult = await this.mcpCall("openrouter", "video_submit", orArgs);
       const generationId = submitResult.id;
       if (!generationId) throw new ApiError(500, submitResult, "OpenRouter connector did not return a generation id");
+      await refreshBalanceCache(this);
       const stored = {
         taskId, status: "pending",
         model, prompt: params.prompt,
@@ -478,6 +537,7 @@ var IronlabsClient = class {
         result.videoUrl = poll.unsigned_urls?.[0] || null;
         result.orResult = poll;
         writeTask(id, result);
+        await refreshBalanceCache(this);
         return result;
       }
       if (poll.status === "failed") {
@@ -958,6 +1018,8 @@ async function taskChain(client, positional) {
     const dlResult = await client.mcpCall("openrouter", "video_download", { url });
     if (!dlResult.data_base64) throw new Error("video_download returned no data");
     arrayBuf = Buffer.from(dlResult.data_base64, "base64");
+    // video_download hits the same billable connector as generation — refresh in case it's metered too.
+    await refreshBalanceCache(client);
   } else {
     const resp = await fetch(url);
     if (!resp.ok) throw new Error(`Download failed: ${resp.status}`);
@@ -1264,7 +1326,11 @@ async function main() {
     }
     if (e instanceof InsufficientCreditError) {
       console.error(`Credit Error: ${e.message}`);
-      console.error(`  Available: ${e.available}, Required: ${e.required}`);
+      // Some rejections (e.g. from the MCP connector call) only carry a preformatted
+      // message, not a numeric breakdown — skip the redundant "0, 0" line then.
+      if (e.available || e.required) {
+        console.error(`  Available: ${e.available}, Required: ${e.required}`);
+      }
       process.exit(1);
     }
     if (e instanceof ApiError) {

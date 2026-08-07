@@ -1,25 +1,41 @@
 /**
  * Balance cache module.
- * Reads/writes ~/.ironlabs/balance-cache.json with TTL-based expiry.
+ * Reads/writes ~/.ironlabs/balance-cache-<key hash>.json with TTL-based expiry.
+ * Cache file is namespaced per API key so switching accounts never shows a
+ * stale balance left over from a different key.
  * statusLine calls this on every refresh — must be fast (local file only).
  */
 
 import fs from 'fs'
 import path from 'path'
 import os from 'os'
+import crypto from 'crypto'
 
-const CACHE_DIR  = path.join(os.homedir(), '.ironlabs')
-const CACHE_FILE = path.join(CACHE_DIR, 'balance-cache.json')
+const CACHE_DIR = path.join(os.homedir(), '.ironlabs')
 const DEFAULT_TTL_MS = 30_000 // 30 seconds
+
+// Truncation length for the per-key cache filename hash. Mirrored in
+// ironlabs-cli.mjs's balanceCacheFilePath() and gemini.mjs's refreshBalanceCache()
+// — keep all three in sync if this ever changes, or the caches silently diverge.
+const HASH_LENGTH = 16
+
+// Pre-per-key-scoping cache file (unscoped, single file for all keys). Orphaned
+// on disk after upgrading to the per-key scheme below; cleaned up opportunistically.
+const LEGACY_CACHE_FILE = path.join(CACHE_DIR, 'balance-cache.json')
 
 export interface BalanceData {
   balance: number    // in cents
   updated_at: number // Unix timestamp in ms
 }
 
-export function readCache(): BalanceData | null {
+function cacheFilePath(apiKey: string): string {
+  const hash = crypto.createHash('sha256').update(apiKey).digest('hex').slice(0, HASH_LENGTH)
+  return path.join(CACHE_DIR, `balance-cache-${hash}.json`)
+}
+
+export function readCache(apiKey: string): BalanceData | null {
   try {
-    const raw  = fs.readFileSync(CACHE_FILE, 'utf-8')
+    const raw  = fs.readFileSync(cacheFilePath(apiKey), 'utf-8')
     const data = JSON.parse(raw) as BalanceData
     if (typeof data.balance !== 'number' || typeof data.updated_at !== 'number') return null
     return data
@@ -32,18 +48,26 @@ export function isCacheFresh(data: BalanceData, ttlMs: number = DEFAULT_TTL_MS):
   return Date.now() - data.updated_at < ttlMs
 }
 
-export function writeCache(balance: number): void {
+// Display-only — never used for spend authorization.
+export function writeCache(apiKey: string, balance: number): void {
   const data: BalanceData = { balance, updated_at: Date.now() }
   try {
     fs.mkdirSync(CACHE_DIR, { recursive: true })
-    fs.writeFileSync(CACHE_FILE, JSON.stringify(data, null, 2), 'utf-8')
+    fs.writeFileSync(cacheFilePath(apiKey), JSON.stringify(data, null, 2), 'utf-8')
   } catch {
     // Silent fail — statusLine must never crash
+    return
+  }
+  try {
+    fs.unlinkSync(LEGACY_CACHE_FILE)
+  } catch {
+    // Already gone, or never existed — fine either way.
   }
 }
 
-export function getBalance(): { data: BalanceData | null; fresh: boolean } {
-  const data = readCache()
+export function getBalance(apiKey: string | undefined): { data: BalanceData | null; fresh: boolean } {
+  if (!apiKey) return { data: null, fresh: false }
+  const data = readCache(apiKey)
   if (!data) return { data: null, fresh: false }
   return { data, fresh: isCacheFresh(data) }
 }
@@ -70,10 +94,10 @@ export async function refreshFromApi(): Promise<void> {
   }
 
   const raw = json.data?.totalBalance ?? json.balance
-  const dollars = typeof raw === 'string' ? parseFloat(raw) : raw
+  const dollars = typeof raw === 'string' ? (raw.trim() === '' ? NaN : Number(raw)) : raw
 
-  if (typeof dollars === 'number' && !Number.isNaN(dollars)) {
+  if (typeof dollars === 'number' && Number.isFinite(dollars)) {
     // totalBalance is denominated in dollars — convert to cents to match BalanceData's contract.
-    writeCache(Math.round(dollars * 100))
+    writeCache(apiKey, Math.round(dollars * 100))
   }
 }
