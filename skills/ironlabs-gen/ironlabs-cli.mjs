@@ -225,6 +225,7 @@ var IronlabsClient = class {
         throw new InsufficientCreditError({
           available: err.available ?? err.error?.available,
           required: err.required ?? err.error?.required,
+          message: err.message || err.error?.message,
         });
       }
       throw new ApiError(resp.status, err, err.error?.message || err.message);
