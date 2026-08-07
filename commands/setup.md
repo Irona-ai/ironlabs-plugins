@@ -145,8 +145,8 @@ Tell the user:
 >
 > The following skills will be available:
 > - `director` — AI video creative director (entry point for all video creation)
-> - `ironlabs-gen` — video and image generation via OpenRouter
-> - `gemini-gen` — visual analysis and multimodal understanding via Gemini
+> - `ironlabs-gen` — video and image generation
+> - `visual-analysis` — visual analysis and multimodal understanding
 > - `video-download` — download videos from YouTube, TikTok, and 1000+ platforms
 >
 > Some skills require external connectors configured at **Settings → Connectors** in IronLabs:
@@ -155,4 +155,4 @@ Tell the user:
 > |-------|-----------|-----------------|
 > | `ironlabs-gen`, `director` | OpenRouter | Video/image generation |
 >
-> `gemini-gen` needs no external connector — it runs natively through Irona's LLM gateway.
+> `visual-analysis` needs no external connector — it runs natively through Irona's LLM gateway.

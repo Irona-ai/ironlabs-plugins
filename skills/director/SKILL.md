@@ -66,9 +66,9 @@ Don't guess — ask. Every detail the user confirms is one fewer reason to regen
 - Key selling points (what makes it special?)
 - Target audience / platform (TikTok vertical? YouTube horizontal?)
 
-When the user provides a product image, **always run Gemini analysis first** before writing the prompt:
+When the user provides a product image, **always run visual analysis first** before writing the prompt:
 ```bash
-node ${CLAUDE_PLUGIN_ROOT}/skills/gemini-gen/scripts/gemini.mjs \
+node ${CLAUDE_PLUGIN_ROOT}/skills/visual-analysis/scripts/analyze.mjs \
   --file <product-image> --mode product
 ```
 This returns structured JSON (type, color, material, selling points, brand tone, scene suggestions).
@@ -102,12 +102,12 @@ User brief → [Clarify if needed] → Write prompt → Confirm → Generate
 This path covers the common single-shot, live-presenter TikTok product video (commercial Scenario D). If the brief is instead a viral-video replication, a short product-only brand film (≤5s, no presenter), or a multi-shot TVC/brand narrative, route through `Read ${CLAUDE_SKILL_DIR}/commercial/INDEX.md` first — it picks the right scenario (A/B/C/D) before you write anything.
 
 ```
-Product image → Gemini analysis → Upload material → Write prompt → Generate
+Product image → visual analysis → Upload material → Write prompt → Generate
 ```
 
-1. **Analyze product** with Gemini (native via Irona gateway — no OpenRouter connector):
+1. **Analyze product** with visual analysis (native via Irona gateway — no OpenRouter connector):
 ```bash
-node ${CLAUDE_PLUGIN_ROOT}/skills/gemini-gen/scripts/gemini.mjs \
+node ${CLAUDE_PLUGIN_ROOT}/skills/visual-analysis/scripts/analyze.mjs \
   --file <product-image> --mode product
 ```
 Use the returned JSON to populate selling points, model dialogue, and scene suggestions.

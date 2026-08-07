@@ -8,7 +8,7 @@
 ## Step 1 — Product Analysis
 
 ```bash
-node ${CLAUDE_PLUGIN_ROOT}/skills/gemini-gen/scripts/gemini.mjs \
+node ${CLAUDE_PLUGIN_ROOT}/skills/visual-analysis/scripts/analyze.mjs \
   --file product.jpg --mode product
 ```
 
@@ -16,23 +16,21 @@ node ${CLAUDE_PLUGIN_ROOT}/skills/gemini-gen/scripts/gemini.mjs \
 
 ```json
 {
-  "product": {
-    "type": "Resistance loop bands",
-    "color": "Pink 10lb, Blue 15lb, Mint green 20lb",
-    "material": "TPE elastic, matte finish, soft and skin-friendly",
-    "highlights": "Three bands with progressive resistance for training, foldable and portable, pastel macaron color scheme",
-    "brand_tone": "Youthful athletic, trendy fitness"
-  },
+  "type": "Resistance loop bands",
+  "color": "Pink 10lb, Blue 15lb, Mint green 20lb",
+  "material": "TPE elastic, matte finish, soft and skin-friendly",
+  "selling_points": [
+    "Three resistance levels for progressive training, suitable for beginners to advanced",
+    "Compact and portable, folds to fit in a bag for anytime/anywhere workouts",
+    "Pastel macaron color scheme, won't roll up during use"
+  ],
+  "brand_tone": "Youthful athletic, trendy fitness",
   "scene_suggestions": [
     "Bright modern living room morning workout",
     "Hotel room travel fitness",
     "Bedroom bedtime stretching"
   ],
-  "selling_points": [
-    "Three resistance levels for progressive training, suitable for beginners to advanced",
-    "Compact and portable, folds to fit in a bag for anytime/anywhere workouts",
-    "Pastel macaron color scheme, won't roll up during use"
-  ]
+  "usage_description": "Loop the band around ankles, wrists, or above the knees to add resistance to bodyweight exercises like leg raises, squats, and lateral walks."
 }
 ```
 
