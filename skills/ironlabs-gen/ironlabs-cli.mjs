@@ -251,7 +251,12 @@ var IronlabsClient = class {
     // insufficient-balance rejection here silently looks like a successful call whose
     // JSON.parse just happened to fail.
     if (result.result?.isError) {
-      if (/insufficient balance/i.test(textContent.text)) {
+      // Matches the wording the backend actually throws today (InsufficientBalanceError:
+      // "Insufficient balance: current=... cents, ...") plus plausible variants ("insufficient
+      // credits", "insufficient funds") in case that phrasing drifts — this is plain text
+      // extracted from a rendered error message, not a structured field, so it's matched
+      // loosely on purpose rather than pinned to one exact string.
+      if (/insufficient (balance|credits?|funds)/i.test(textContent.text)) {
         throw new InsufficientCreditError({ message: textContent.text });
       }
       // Tool-level failures (e.g. "missing required argument", "prompt exceeds
