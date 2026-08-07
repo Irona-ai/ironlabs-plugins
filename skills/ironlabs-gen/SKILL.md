@@ -30,6 +30,8 @@ Uses `ironlabs-cli.mjs` — same CLI interface as the IronLabs plugin, adapted f
 The **OpenRouter** external connector must be connected in IronLabs (**Settings → Connectors → OpenRouter**).
 Visual analysis (material-ingest) shells out to `visual-analysis`'s script, which runs natively via Irona's LLM gateway — no OpenRouter connector or additional setup needed.
 
+**MuAPI-first for video**: video generation tries the **MuAPI** connector first for every model, falling back to OpenRouter automatically on any submit failure. This is transparent — no flag needed — and only applies to plain text-to-video / single-first-frame image-to-video (no `last_image_url` interpolation or multi-reference support on MuAPI yet, so those requests skip straight to OpenRouter). MuAPI currently only has confirmed backend coverage for `youmeng-2.0` / `seedance-2.0` / `sd-2.0` (→ `bytedance/seedance-2.0`); other models will submit-fail on MuAPI and fall straight through to OpenRouter until the backend adds more coverage.
+
 ---
 
 ## Quick Start

@@ -26,6 +26,10 @@ var InsufficientCreditError = class extends ApiError {
   }
 };
 
+function errMsg(e) {
+  return e && e.message ? e.message : String(e);
+}
+
 // Local task/material store helpers
 import { mkdirSync, writeFileSync, readFileSync, readdirSync, unlinkSync } from "fs";
 import { join } from "path";
@@ -140,6 +144,12 @@ const FAL_VIDEO_MODEL_MAP = {
   "veo-3.1-extend":      "fal-ai/veo3.1/extend-video",
   "veo-3.1-extend-fast": "fal-ai/veo3.1/fast/extend-video",
 };
+// MuAPI is tried first for every video generation (see MUAPI-first note in createTask()).
+// Kept as a named model so callers/logs can still identify the one model MuAPI has
+// confirmed connector coverage for today; other models will submit-fail on MuAPI and
+// fall straight through to OpenRouter until the backend adds more MuAPI coverage.
+const MUAPI_VIDEO_MODEL = "bytedance/seedance-2.0";
+
 const RATIO_TO_IMAGE_SIZE = {
   "1:1":  "1024x1024",
   "16:9": "1536x1024",
@@ -271,6 +281,35 @@ var IronlabsClient = class {
   mapFalModel(model) {
     return FAL_VIDEO_MODEL_MAP[model] || model;
   }
+  // MuAPI is attempted first for all video generation, regardless of model. It has no
+  // last_image_url interpolation or multi-reference support, so those requests skip
+  // straight to OpenRouter; everything else tries MuAPI and falls back to OpenRouter
+  // on any submit failure (e.g. a model MuAPI doesn't cover yet).
+  canTryMuapiVideo(model, orArgs) {
+    return !orArgs.last_image_url && !orArgs.reference_image_urls;
+  }
+  async _createMuapiVideoTask(orArgs, model, params, taskId, estimatedCredit) {
+    const muapiArgs = {
+      prompt: orArgs.prompt,
+      ...(orArgs.image_url ? { image_url: orArgs.image_url } : {}),
+      ...(orArgs.duration ? { duration: orArgs.duration } : {}),
+      ...(orArgs.aspect_ratio ? { aspect_ratio: orArgs.aspect_ratio } : {}),
+      resolution: orArgs.resolution === "1080p" ? "1080p" : "720p",
+    };
+    console.log(`Submitting video via MuAPI connector (${model})...`);
+    const submitResult = await this.mcpCall("muapi", "video_submit", muapiArgs);
+    const requestId = submitResult.request_id || submitResult.requestId || submitResult.id;
+    if (!requestId) throw new ApiError(500, submitResult, "MuAPI connector did not return a request id");
+    const stored = {
+      taskId, status: "pending",
+      model, prompt: params.prompt,
+      tags: params.tags || [],
+      videoUrl: null, imageUrl: null,
+      _muapiId: requestId,
+    };
+    writeTask(taskId, stored);
+    return { task: { id: taskId, status: "pending", estimatedCredit } };
+  }
   async createTask(params) {
     const isImage = this.isImageModel(params.model);
     // Resolve material data URIs from local store
@@ -376,6 +415,21 @@ var IronlabsClient = class {
         }
         orArgs.resolution = resolved;
       }
+
+      // MuAPI-first: try MuAPI before OpenRouter for every video generation request that
+      // doesn't need last_image_url interpolation or multi-reference support (MuAPI's
+      // video_submit has no fields for either). MuAPI today only actually covers
+      // bytedance/seedance-2.0 — other models will submit-fail on MuAPI and fall straight
+      // through to the existing OpenRouter path below; this never blocks generation.
+      if (this.canTryMuapiVideo(model, orArgs)) {
+        try {
+          const muapiTask = await this._createMuapiVideoTask(orArgs, model, params, taskId, estimatedCredit);
+          if (muapiTask) return muapiTask;
+        } catch (muapiErr) {
+          console.error(`Note: MuAPI generation failed (${errMsg(muapiErr)}) — falling back to OpenRouter.`);
+        }
+      }
+
       console.log(`Submitting video via OpenRouter connector (${model})...`);
       const submitResult = await this.mcpCall("openrouter", "video_submit", orArgs);
       const generationId = submitResult.id;
@@ -460,10 +514,33 @@ var IronlabsClient = class {
     return {};
   }
   async listTags() { return { tags: [] }; }
+  async _waitForMuapiTask(id, result, maxWaitMs) {
+    const start = Date.now();
+    while (Date.now() - start < maxWaitMs) {
+      const remaining = maxWaitMs - (Date.now() - start);
+      await new Promise(r => setTimeout(r, Math.min(10_000, remaining))); // poll every 10s, capped by remaining timeout
+      const poll = await this.mcpCall("muapi", "video_status", { id: result._muapiId });
+      const status = (poll.status || "unknown").toLowerCase();
+      process.stderr.write(`  Status: ${status}... (${Math.round((Date.now() - start) / 1000)}s elapsed)\n`);
+      if (status === "completed" || status === "succeeded" || status === "success") {
+        const rawOutput = poll.outputs?.[0] ?? poll.url ?? poll.output;
+        result.status = "completed";
+        result.videoUrl = (typeof rawOutput === "string" ? rawOutput : rawOutput?.url) || null;
+        result.muapiResult = poll;
+        writeTask(id, result);
+        return result;
+      }
+      if (status === "failed" || status === "error" || status === "canceled" || status === "cancelled") {
+        throw new ApiError(500, poll, `Video generation failed: ${poll.error || poll.detail || "unknown error"}`);
+      }
+    }
+    throw new ApiError(408, {}, `Video generation timed out after ${maxWaitMs / 1000}s`);
+  }
   async waitForTask(id, maxWaitMs = 600_000) {
     const result = readTask(id);
     if (!result) throw new ApiError(404, {}, `Task #${id} not found`);
     if (result.status === "completed") return result;
+    if (result._muapiId) return this._waitForMuapiTask(id, result, maxWaitMs);
     // Video task: poll via openrouter connector until terminal
     const generationId = result._openrouterId;
     if (!generationId) throw new ApiError(500, {}, `Task #${id} has no generation ID to poll`);

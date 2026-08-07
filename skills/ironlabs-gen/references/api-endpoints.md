@@ -140,6 +140,55 @@ Response: `{ data_base64: "<base64 video bytes>" }`.
 
 ---
 
+### MCP Connector — MuAPI (video first-try path)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/mcp/muapi` | Run `video_submit` via MCP connector (async) — confirmed backend coverage today is **only** model `bytedance/seedance-2.0` |
+| POST | `/mcp/muapi` | Run `video_status` to poll a submitted generation |
+| POST | `/mcp/muapi` | Run `video_download` to fetch the finished video bytes |
+
+`ironlabs-cli.mjs` tries this connector automatically before OpenRouter for every video
+generation request that has no `last_image_url` or `reference_image_urls` (MuAPI doesn't
+support frame interpolation or multi-reference yet — those requests skip straight to
+OpenRouter). This is not gated to a single model on the client side: any submit failure on
+this connector — including a model MuAPI's backend doesn't cover yet — falls straight through
+to the OpenRouter path, no user-visible error, just a stderr note.
+
+**Request — submit:**
+```json
+{
+  "params": {
+    "name": "video_submit",
+    "arguments": {
+      "prompt": "A cat dancing on the moon, cinematic.",
+      "image_url": "data:image/jpeg;base64,<b64>",
+      "duration": 5,
+      "aspect_ratio": "16:9",
+      "resolution": "720p"
+    }
+  }
+}
+```
+`image_url` (optional) submits image-to-video instead of text-to-video. `resolution` is `"720p"`
+(default) or `"1080p"` only. Response: `{ request_id }` (MuAPI's raw submit response —
+`requestId`/`id` are also accepted as fallback field names).
+
+**Request — poll status:**
+```json
+{ "params": { "name": "video_status", "arguments": { "id": "<request-id>" } } }
+```
+Poll every ~10s until `status` is a terminal value (`"completed"`/`"succeeded"`/`"success"` or
+`"failed"`/`"error"`/`"canceled"`/`"cancelled"`). Completed result is in `outputs[0]`.
+
+**Request — download:**
+```json
+{ "params": { "name": "video_download", "arguments": { "url": "<video-url>" } } }
+```
+Response: `{ data_base64: "<base64 video bytes>" }`.
+
+---
+
 ### MCP Connector — Fal Direct (multi-reference & video-to-video)
 
 | Method | Path | Description |
