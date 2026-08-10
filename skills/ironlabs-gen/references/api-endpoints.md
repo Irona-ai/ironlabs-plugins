@@ -144,16 +144,35 @@ Response: `{ data_base64: "<base64 video bytes>" }`.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| POST | `/mcp/muapi` | Run `video_submit` via MCP connector (async) — confirmed backend coverage today is **only** model `bytedance/seedance-2.0` |
+| POST | `/mcp/muapi` | Run `video_submit` via MCP connector (async) — coverage below |
 | POST | `/mcp/muapi` | Run `video_status` to poll a submitted generation |
 | POST | `/mcp/muapi` | Run `video_download` to fetch the finished video bytes |
 
-`ironlabs-cli.mjs` tries this connector automatically before OpenRouter for every video
-generation request that has no `last_image_url` or `reference_image_urls` (MuAPI doesn't
-support frame interpolation or multi-reference yet — those requests skip straight to
-OpenRouter). This is not gated to a single model on the client side: any submit failure on
-this connector — including a model MuAPI's backend doesn't cover yet — falls straight through
-to the OpenRouter path, no user-visible error, just a stderr note.
+`ironlabs-cli.mjs` gates this connector client-side via `MUAPI_MODEL_ID` (OpenRouter-backed
+models) and `MUAPI_ONLY_VIDEO_MODEL_MAP` (models with no OpenRouter equivalent), on top of the
+`last_image_url` / `reference_image_urls` restriction above:
+
+| Resolved model | `model` sent to MuAPI | Verified? | Falls back to OpenRouter on failure? |
+|---|---|---|---|
+| `bytedance/seedance-2.0` | *(omitted — confirmed working as MuAPI's implicit default)* | ✅ Confirmed | Yes |
+| `x-ai/grok-imagine-video` | `grok-imagine-video` | ⚠️ Unverified guess | Yes |
+| `kwaivgi/kling-v3.0-pro` | `kling-v3.0-pro` | ⚠️ Unverified guess | Yes |
+| `happyhorse-1.1` (no OR model) | `happyhorse-1.1` | ⚠️ Unverified guess | **No — hard error** |
+
+The `model` field is omitted entirely for `bytedance/seedance-2.0` rather than sent as
+`"seedance-2.0"` — that call shape (no `model` field) is the one confirmed working against the
+live connector, and adding an untested field risks regressing it if the schema rejects unknown
+properties. It's only added for the unverified entries, where it's required to have any chance
+of hitting the intended backend.
+
+Any other requested model skips MuAPI entirely and goes straight to OpenRouter, since MuAPI
+would otherwise risk silently rendering with the wrong model while the task record still
+showed the caller-selected one. For the unverified entries, a submit failure (4xx) falls
+straight through to the OpenRouter path with no user-visible error, just a stderr note — this
+is what makes shipping the guess safe for models that *have* an OpenRouter fallback. It is
+**not** safe for `happyhorse-1.1`, which has none; confirm the real `model` identifier and
+connector behavior with whoever owns the IronLabs `/mcp/muapi` backend before relying on it in
+production (see the checklist in `SKILL.md`'s MuAPI section).
 
 **Request — submit:**
 ```json
@@ -170,9 +189,11 @@ to the OpenRouter path, no user-visible error, just a stderr note.
   }
 }
 ```
-`image_url` (optional) submits image-to-video instead of text-to-video. `resolution` is `"720p"`
-(default) or `"1080p"` only. Response: `{ request_id }` (MuAPI's raw submit response —
-`requestId`/`id` are also accepted as fallback field names).
+`model` (see coverage table above — sent only for the unverified entries; omitted for the one
+confirmed model, `bytedance/seedance-2.0`). `image_url` (optional) submits image-to-video
+instead of text-to-video. `resolution` is `"720p"` (default) or `"1080p"` only. Response:
+`{ request_id }` (MuAPI's raw submit response — `requestId`/`id` are also accepted as fallback
+field names).
 
 **Request — poll status:**
 ```json

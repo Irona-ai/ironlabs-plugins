@@ -144,11 +144,30 @@ const FAL_VIDEO_MODEL_MAP = {
   "veo-3.1-extend":      "fal-ai/veo3.1/extend-video",
   "veo-3.1-extend-fast": "fal-ai/veo3.1/fast/extend-video",
 };
-// MuAPI is tried first for every video generation (see MUAPI-first note in createTask()).
-// Kept as a named model so callers/logs can still identify the one model MuAPI has
-// confirmed connector coverage for today; other models will submit-fail on MuAPI and
-// fall straight through to OpenRouter until the backend adds more MuAPI coverage.
-const MUAPI_VIDEO_MODEL = "bytedance/seedance-2.0";
+// MuAPI is tried first for every video generation whose resolved model has an entry here
+// (see MUAPI-first note in createTask()). Keyed by the OR-resolved model id; value is the
+// `model` string sent to MuAPI's video_submit tool.
+//
+// UNVERIFIED: only the bytedance/seedance-2.0 → "seedance-2.0" mapping has been confirmed
+// against the live IronLabs `/mcp/muapi` connector. The grok-imagine-video and
+// kling-v3.0-pro entries are best-guess slugs based on MuAPI's public playground (see
+// muapi.ai/playground) — the IronLabs backend connector may expect different identifiers,
+// or may not accept a `model` argument for these at all. This is safe to leave in only
+// because canTryMuapiVideo()'s caller falls back to OpenRouter on any 4xx submit failure —
+// a wrong/rejected guess degrades gracefully instead of silently mis-rendering. Confirm the
+// real identifiers with whoever owns the IronLabs muapi connector backend and update this
+// map accordingly (see the confirmation checklist in SKILL.md's MuAPI section).
+const MUAPI_MODEL_ID = {
+  "bytedance/seedance-2.0":  "seedance-2.0",
+  "x-ai/grok-imagine-video": "grok-imagine-video",
+  "kwaivgi/kling-v3.0-pro":  "kling-v3.0-pro",
+};
+// MuAPI-only video models with no OpenRouter equivalent — there is nothing to fall back to,
+// so a MuAPI submit failure for these is a hard error, not a graceful degrade. Same
+// UNVERIFIED caveat as MUAPI_MODEL_ID above applies to the identifier sent as `model`.
+const MUAPI_ONLY_VIDEO_MODEL_MAP = {
+  "happyhorse-1.1": "happyhorse-1.1",
+};
 
 const RATIO_TO_IMAGE_SIZE = {
   "1:1":  "1024x1024",
@@ -281,16 +300,25 @@ var IronlabsClient = class {
   mapFalModel(model) {
     return FAL_VIDEO_MODEL_MAP[model] || model;
   }
-  // MuAPI is attempted first for all video generation, regardless of model. It has no
-  // last_image_url interpolation or multi-reference support, so those requests skip
-  // straight to OpenRouter; everything else tries MuAPI and falls back to OpenRouter
-  // on any submit failure (e.g. a model MuAPI doesn't cover yet).
+  // MuAPI is only attempted when the resolved model has a MUAPI_MODEL_ID entry — routing
+  // an unmapped model through it would either submit-fail with no OR equivalent to identify
+  // it by, or (worse) render with an unintended backend while the task record still claims
+  // the caller-selected model. It also has no last_image_url interpolation or
+  // multi-reference support, so those requests skip straight to OpenRouter too.
   canTryMuapiVideo(model, orArgs) {
-    return !orArgs.last_image_url && !orArgs.reference_image_urls;
+    return Object.prototype.hasOwnProperty.call(MUAPI_MODEL_ID, model) &&
+      !orArgs.last_image_url && !orArgs.reference_image_urls;
   }
   async _createMuapiVideoTask(orArgs, model, params, taskId, estimatedCredit) {
+    const muapiModel = MUAPI_MODEL_ID[model];
     const muapiArgs = {
       prompt: orArgs.prompt,
+      // bytedance/seedance-2.0 was confirmed working with NO `model` field at all (it's
+      // MuAPI's implicit default) — omit it there rather than risk regressing the one known-
+      // good call shape with an untested field, in case the connector's schema rejects
+      // unrecognized properties. Only send `model` for the other, unverified entries, where
+      // it's required to have any chance of hitting the right backend.
+      ...(model !== "bytedance/seedance-2.0" ? { model: muapiModel } : {}),
       ...(orArgs.image_url ? { image_url: orArgs.image_url } : {}),
       ...(orArgs.duration ? { duration: orArgs.duration } : {}),
       ...(orArgs.aspect_ratio ? { aspect_ratio: orArgs.aspect_ratio } : {}),
@@ -306,9 +334,45 @@ var IronlabsClient = class {
       tags: params.tags || [],
       videoUrl: null, imageUrl: null,
       _muapiId: requestId,
+      _muapiModel: muapiModel,
     };
     writeTask(taskId, stored);
     return { task: { id: taskId, status: "pending", estimatedCredit } };
+  }
+  // MuAPI-only models (see MUAPI_ONLY_VIDEO_MODEL_MAP) have no OpenRouter equivalent, so a
+  // submit failure here is fatal rather than falling back — there's nowhere safe to fall
+  // back to, and silently substituting a different OR model would misrepresent what the
+  // caller asked for.
+  async _createMuapiOnlyVideoTask(params, taskId) {
+    const muapiModel = MUAPI_ONLY_VIDEO_MODEL_MAP[params.model];
+    // No OR_PRICING entry exists for MuAPI-only models (see _createFalTask for the same
+    // pattern) — estimatedCredit is left at 0 rather than fabricating a number.
+    if (params.materials?.some(m => m.role === "ref_video")) {
+      throw new ApiError(400, {}, `ref_video has no effect on "${params.model}" — MuAPI's video_submit tool has no video-input field. Use --model veo-3.1-extend (or veo-3.1-extend-fast) for real motion continuation, or extract a tail frame with ffmpeg and pass it as --materials "ID:first_frame" instead.`);
+    }
+    const firstFrame = params.materials?.find(m => m.role === "first_frame" || m.role === "ref_image");
+    const muapiArgs = {
+      prompt: params.prompt,
+      model: muapiModel,
+      ...(firstFrame?._dataUri ? { image_url: firstFrame._dataUri } : {}),
+      ...(params.duration ? { duration: parseInt(params.duration) } : {}),
+      ...(params.ratio ? { aspect_ratio: params.ratio } : {}),
+      resolution: params.resolution === "1080p" ? "1080p" : "720p",
+    };
+    console.log(`Submitting video via MuAPI connector (${muapiModel})...`);
+    const submitResult = await this.mcpCall("muapi", "video_submit", muapiArgs);
+    const requestId = submitResult.request_id || submitResult.requestId || submitResult.id;
+    if (!requestId) throw new ApiError(500, submitResult, "MuAPI connector did not return a request id");
+    const stored = {
+      taskId, status: "pending",
+      model: params.model, prompt: params.prompt,
+      tags: params.tags || [],
+      videoUrl: null, imageUrl: null,
+      _muapiId: requestId,
+      _muapiModel: muapiModel,
+    };
+    writeTask(taskId, stored);
+    return { task: { id: taskId, status: "pending", estimatedCredit: 0 } };
   }
   async createTask(params) {
     const isImage = this.isImageModel(params.model);
@@ -327,6 +391,11 @@ var IronlabsClient = class {
     // path entirely — checked before mapModel() so the alias resolves correctly.
     if (this.isFalDirectModel(params.model)) {
       return this._createFalTask(params, taskId);
+    }
+    // MuAPI-only models (see MUAPI_ONLY_VIDEO_MODEL_MAP) also skip mapModel() entirely —
+    // there's no OpenRouter id to resolve to.
+    if (Object.prototype.hasOwnProperty.call(MUAPI_ONLY_VIDEO_MODEL_MAP, params.model)) {
+      return this._createMuapiOnlyVideoTask(params, taskId);
     }
     const model = this.mapModel(params.model, isImage);
     const { credits: estimatedCredit } = await this.estimateCost({ model: params.model, duration: params.duration });
@@ -416,17 +485,31 @@ var IronlabsClient = class {
         orArgs.resolution = resolved;
       }
 
-      // MuAPI-first: try MuAPI before OpenRouter for every video generation request that
-      // doesn't need last_image_url interpolation or multi-reference support (MuAPI's
-      // video_submit has no fields for either). MuAPI today only actually covers
-      // bytedance/seedance-2.0 — other models will submit-fail on MuAPI and fall straight
-      // through to the existing OpenRouter path below; this never blocks generation.
+      // MuAPI-first: try MuAPI before OpenRouter, but only when the resolved model has a
+      // MUAPI_MODEL_ID entry (see the UNVERIFIED caveat there) and the request doesn't
+      // need last_image_url interpolation or multi-reference support (MuAPI's video_submit
+      // has no fields for either). Any other model skips MuAPI entirely and goes straight
+      // to the OpenRouter path below; this never blocks generation.
       if (this.canTryMuapiVideo(model, orArgs)) {
         try {
           const muapiTask = await this._createMuapiVideoTask(orArgs, model, params, taskId, estimatedCredit);
           if (muapiTask) return muapiTask;
         } catch (muapiErr) {
-          console.error(`Note: MuAPI generation failed (${errMsg(muapiErr)}) — falling back to OpenRouter.`);
+          // Only fall back to OpenRouter when MuAPI cleanly rejected the
+          // submission (4xx: bad request, rejected auth, tool-level
+          // validation failure) — those are surfaced by mcpCall before any
+          // generation job could have been created. Anything else (network
+          // drop mid-request, malformed/partial response, missing request
+          // id after an apparent success) leaves MuAPI's job state unknown;
+          // falling back there risks both providers rendering the same
+          // prompt and burning double credits, so surface the error instead
+          // of guessing.
+          const status = muapiErr?.status;
+          if (status && status >= 400 && status < 500) {
+            console.error(`Note: MuAPI rejected the request (${errMsg(muapiErr)}) — falling back to OpenRouter.`);
+          } else {
+            throw muapiErr;
+          }
         }
       }
 
@@ -524,13 +607,26 @@ var IronlabsClient = class {
       process.stderr.write(`  Status: ${status}... (${Math.round((Date.now() - start) / 1000)}s elapsed)\n`);
       if (status === "completed" || status === "succeeded" || status === "success") {
         const rawOutput = poll.outputs?.[0] ?? poll.url ?? poll.output;
+        const videoUrl = (typeof rawOutput === "string" ? rawOutput : rawOutput?.url) || null;
+        // MuAPI can report a terminal "completed" status with no usable output
+        // URL — treat that as a failure rather than storing a "completed" task
+        // that getTaskResult() would hand back with videoUrl: null.
+        if (!videoUrl) {
+          result.status = "failed";
+          result.muapiResult = poll;
+          writeTask(id, result);
+          throw new ApiError(500, poll, "MuAPI reported completion but returned no video URL");
+        }
         result.status = "completed";
-        result.videoUrl = (typeof rawOutput === "string" ? rawOutput : rawOutput?.url) || null;
+        result.videoUrl = videoUrl;
         result.muapiResult = poll;
         writeTask(id, result);
         return result;
       }
       if (status === "failed" || status === "error" || status === "canceled" || status === "cancelled") {
+        result.status = "failed";
+        result.muapiResult = poll;
+        writeTask(id, result);
         throw new ApiError(500, poll, `Video generation failed: ${poll.error || poll.detail || "unknown error"}`);
       }
     }
@@ -813,10 +909,13 @@ Options for generate/wait:
   --timeout <seconds>          Max time to poll a pending video task (default: 600)
 
 Model aliases:
-  ironlabs-2.0          → x-ai/grok-imagine-video, via OpenRouter (video, default; async, poll with task wait)
-                          Supports multiple ref_image + @ImageN binding directly — no model switch needed.
-  ironlabs-2.0-fast     → kwaivgi/kling-v3.0-pro, via OpenRouter (video; async; same multi-ref support)
-  seedance-2.0          → bytedance/seedance-2.0, via OpenRouter (video; async; same multi-ref support)
+  ironlabs-2.0          → x-ai/grok-imagine-video (video, default; async, poll with task wait). MuAPI-first for
+                          plain text/single-image requests (UNVERIFIED — falls back to OpenRouter automatically),
+                          OpenRouter otherwise. Supports multiple ref_image + @ImageN binding directly.
+  ironlabs-2.0-fast     → kwaivgi/kling-v3.0-pro (video; async; same multi-ref support). MuAPI-first same as above.
+  seedance-2.0          → bytedance/seedance-2.0 (video; async; same multi-ref support). MuAPI-first, confirmed.
+  happyhorse-1.1        → MuAPI only, no OpenRouter equivalent (video; async). No last_image_url/multi-reference
+                          support — plain text-to-video or single first_frame image-to-video only.
   nano-banana-2         → google/gemini-3.1-flash-image-preview (image)
   grok-multiref         → xai/grok-imagine-video/reference-to-video, direct via fal (video; synchronous). An
                           alternative path to the same @ImageN capability ironlabs-2.0 now has — only reach for
@@ -1051,7 +1150,7 @@ async function taskChain(client, positional) {
   console.error(`\nMaterial #${matId} ready.`);
   if (isVideo) {
     console.error(`Use as: --materials "${matId}:ref_video" --model veo-3.1-extend (or veo-3.1-extend-fast) — this is the only model that actually continues an existing video's motion.`);
-    console.error(`ref_video does NOT work with ironlabs-2.0 / ironlabs-2.0-fast / seedance-2.0 (all OpenRouter models) — none of them accept a video input. For continuity with those, extract a tail frame with ffmpeg and upload that as --materials "ID:first_frame" instead.`);
+    console.error(`ref_video does NOT work with ironlabs-2.0 / ironlabs-2.0-fast / seedance-2.0 / happyhorse-1.1 — none of them accept a video input. For continuity with those, extract a tail frame with ffmpeg and upload that as --materials "ID:first_frame" instead.`);
   } else {
     console.error(`Use as: --materials "${matId}:ref_image"`);
   }
