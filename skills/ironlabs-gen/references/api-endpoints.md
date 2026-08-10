@@ -152,12 +152,13 @@ Response: `{ data_base64: "<base64 video bytes>" }`.
 models) and `MUAPI_ONLY_VIDEO_MODEL_MAP` (models with no OpenRouter equivalent), on top of the
 `last_image_url` / `reference_image_urls` restriction above:
 
-| Resolved model | `model` sent to MuAPI | Verified? | Falls back to OpenRouter on failure? |
-|---|---|---|---|
-| `bytedance/seedance-2.0` | *(omitted — confirmed working as MuAPI's implicit default)* | ✅ Confirmed | Yes |
-| `x-ai/grok-imagine-video` | `grok-imagine-video` | ⚠️ Unverified guess | Yes |
-| `kwaivgi/kling-v3.0-pro` | `kling-v3.0-pro` | ⚠️ Unverified guess | Yes |
-| `happyhorse-1.1` (no OR model) | `happyhorse-1.1` | ⚠️ Unverified guess | **No — hard error** |
+| Resolved model | `model` sent to MuAPI | Max resolution | Verified? | Falls back to OpenRouter on failure? |
+|---|---|---|---|---|
+| `bytedance/seedance-2.0` | *(omitted — confirmed working as MuAPI's implicit default)* | 1080p | ✅ Confirmed | Yes |
+| `x-ai/grok-imagine-video` | `grok-imagine-video` | 1080p | ⚠️ Unverified guess | Yes |
+| `kwaivgi/kling-v3.0-pro` | `kling-v3.0-pro` | 1080p | ⚠️ Unverified guess | Yes |
+| `happyhorse-1.1` (no OR model) | `happyhorse-1.1` | 1080p | ⚠️ Unverified guess | **No — hard error** |
+| `seedance-2-4k` (no OR model) | `seedance-2-vip-text-to-video-4k` | **4K** | ⚠️ Unverified guess | **No — hard error** |
 
 The `model` field is omitted entirely for `bytedance/seedance-2.0` rather than sent as
 `"seedance-2.0"` — that call shape (no `model` field) is the one confirmed working against the
@@ -165,14 +166,19 @@ live connector, and adding an untested field risks regressing it if the schema r
 properties. It's only added for the unverified entries, where it's required to have any chance
 of hitting the intended backend.
 
+Every model above caps `resolution` at `1080p` — **except `seedance-2-4k`**, which passes
+`4k`/`2k` through to MuAPI unchanged instead of downgrading, since MuAPI's public pricing page
+lists a genuine 4K Seedance tier (`seedance-2-vip-text-to-video-4k`, priced around $1.35/s).
+The exact resolution string that tier expects is itself unverified.
+
 Any other requested model skips MuAPI entirely and goes straight to OpenRouter, since MuAPI
 would otherwise risk silently rendering with the wrong model while the task record still
 showed the caller-selected one. For the unverified entries, a submit failure (4xx) falls
 straight through to the OpenRouter path with no user-visible error, just a stderr note — this
 is what makes shipping the guess safe for models that *have* an OpenRouter fallback. It is
-**not** safe for `happyhorse-1.1`, which has none; confirm the real `model` identifier and
-connector behavior with whoever owns the IronLabs `/mcp/muapi` backend before relying on it in
-production (see the checklist in `SKILL.md`'s MuAPI section).
+**not** safe for `happyhorse-1.1` or `seedance-2-4k`, neither of which has one; confirm the real
+`model` identifier and connector behavior with whoever owns the IronLabs `/mcp/muapi` backend
+before relying on either in production (see the checklist in `SKILL.md`'s MuAPI section).
 
 **Request — submit:**
 ```json

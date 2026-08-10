@@ -164,14 +164,20 @@ const MUAPI_MODEL_ID = {
 };
 // MuAPI-only video models with no OpenRouter equivalent — there is nothing to fall back to,
 // so a MuAPI submit failure for these is a hard error, not a graceful degrade. Same
-// UNVERIFIED caveat as MUAPI_MODEL_ID above applies to the identifier sent as `model`.
+// UNVERIFIED caveat as MUAPI_MODEL_ID above applies to muapiModel (the identifier sent as
+// `model`) and to the exact resolution string maxResolution: "4k" implies is sent as-is.
+// maxResolution controls what resolveVideoResolution() clamps --resolution to for this model
+// (see below) — most video models top out at 1080p, but MuAPI's VIP Seedance tier genuinely
+// supports 4K per its public pricing page, so seedance-2-4k opts out of the usual 1080p cap.
 const MUAPI_ONLY_VIDEO_MODEL_MAP = {
-  "happyhorse-1.1": "happyhorse-1.1",
+  "happyhorse-1.1": { muapiModel: "happyhorse-1.1", maxResolution: "1080p" },
+  "seedance-2-4k":  { muapiModel: "seedance-2-vip-text-to-video-4k", maxResolution: "4k" },
 };
 
-// Video models top out at 1080p — "4k"/"2k"/"1k" are accepted as convenience aliases and
+// Most video models top out at 1080p — "4k"/"2k"/"1k" are accepted as convenience aliases and
 // downgraded/normalized to 720p/1080p. Shared by every video path (OpenRouter and
-// MuAPI-only) via resolveVideoResolution() so they don't drift out of sync.
+// MuAPI-only) via resolveVideoResolution() so they don't drift out of sync. A model with a
+// higher maxResolution (see MUAPI_ONLY_VIDEO_MODEL_MAP) opts out of the 1080p clamp instead.
 const VIDEO_RESOLUTION_ALIAS_MAP = { "1k": "720p", "2k": "1080p", "4k": "1080p" };
 
 const RATIO_TO_IMAGE_SIZE = {
@@ -305,7 +311,13 @@ var IronlabsClient = class {
   mapFalModel(model) {
     return FAL_VIDEO_MODEL_MAP[model] || model;
   }
-  resolveVideoResolution(resolution) {
+  resolveVideoResolution(resolution, maxResolution = "1080p") {
+    if (maxResolution === "4k") {
+      // This model genuinely supports 4K (per MUAPI_ONLY_VIDEO_MODEL_MAP) — only "1k" needs
+      // downgrading; "2k"/"4k" pass through unchanged rather than guessing at whatever exact
+      // string MuAPI's 4K tier actually expects (UNVERIFIED — see MUAPI_ONLY_VIDEO_MODEL_MAP).
+      return resolution === "1k" ? "720p" : resolution;
+    }
     const resolved = VIDEO_RESOLUTION_ALIAS_MAP[resolution] || resolution;
     if (resolution === "4k") {
       console.error(`Note: video models support up to 1080p — "4k" will render at 1080p, not 4k.`);
@@ -356,9 +368,14 @@ var IronlabsClient = class {
   // back to, and silently substituting a different OR model would misrepresent what the
   // caller asked for.
   async _createMuapiOnlyVideoTask(params, taskId) {
-    const muapiModel = MUAPI_ONLY_VIDEO_MODEL_MAP[params.model];
+    const { muapiModel, maxResolution } = MUAPI_ONLY_VIDEO_MODEL_MAP[params.model];
     // No OR_PRICING entry exists for MuAPI-only models (see _createFalTask for the same
-    // pattern) — estimatedCredit is left at 0 rather than fabricating a number.
+    // pattern) — estimatedCredit is left at 0 rather than fabricating a number. The 4K
+    // Seedance tier is priced substantially higher than standard tiers (~$1.35/s per MuAPI's
+    // public pricing) — warn since there's no credit estimate to make that cost visible.
+    if (maxResolution === "4k") {
+      console.error(`Note: "${params.model}" is MuAPI's 4K tier — priced notably higher than standard resolutions (~$1.35/s per MuAPI's public pricing). No credit estimate is available for this model.`);
+    }
     if (params.materials?.some(m => m.role === "ref_video")) {
       throw new ApiError(400, {}, `ref_video has no effect on "${params.model}" — MuAPI's video_submit tool has no video-input field. Use --model veo-3.1-extend (or veo-3.1-extend-fast) for real motion continuation, or extract a tail frame with ffmpeg and pass it as --materials "ID:first_frame" instead.`);
     }
@@ -378,7 +395,7 @@ var IronlabsClient = class {
       ...(firstFrame?._dataUri ? { image_url: firstFrame._dataUri } : {}),
       ...(params.duration ? { duration: parseInt(params.duration) } : {}),
       ...(params.ratio ? { aspect_ratio: params.ratio } : {}),
-      resolution: params.resolution ? this.resolveVideoResolution(params.resolution) : "720p",
+      resolution: params.resolution ? this.resolveVideoResolution(params.resolution, maxResolution) : "720p",
     };
     console.log(`Submitting video via MuAPI connector (${muapiModel})...`);
     const submitResult = await this.mcpCall("muapi", "video_submit", muapiArgs);
@@ -929,6 +946,10 @@ Model aliases:
   seedance-2.0          → bytedance/seedance-2.0 (video; async; same multi-ref support). MuAPI-first, confirmed.
   happyhorse-1.1        → MuAPI only, no OpenRouter equivalent (video; async). No last_image_url/multi-reference
                           support — plain text-to-video or single first_frame image-to-video only.
+  seedance-2-4k         → MuAPI only, no OpenRouter equivalent (video; async). Genuinely supports up to 4K
+                          (--resolution 4k passes through, not downgraded to 1080p like other models) — priced
+                          notably higher (~$1.35/s per MuAPI's public pricing). Same input restrictions as
+                          happyhorse-1.1 (single image, no last_frame/ref_video).
   nano-banana-2         → google/gemini-3.1-flash-image-preview (image)
   grok-multiref         → xai/grok-imagine-video/reference-to-video, direct via fal (video; synchronous). An
                           alternative path to the same @ImageN capability ironlabs-2.0 now has — only reach for
@@ -1163,7 +1184,7 @@ async function taskChain(client, positional) {
   console.error(`\nMaterial #${matId} ready.`);
   if (isVideo) {
     console.error(`Use as: --materials "${matId}:ref_video" --model veo-3.1-extend (or veo-3.1-extend-fast) — this is the only model that actually continues an existing video's motion.`);
-    console.error(`ref_video does NOT work with ironlabs-2.0 / ironlabs-2.0-fast / seedance-2.0 / happyhorse-1.1 — none of them accept a video input. For continuity with those, extract a tail frame with ffmpeg and upload that as --materials "ID:first_frame" instead.`);
+    console.error(`ref_video does NOT work with ironlabs-2.0 / ironlabs-2.0-fast / seedance-2.0 / happyhorse-1.1 / seedance-2-4k — none of them accept a video input. For continuity with those, extract a tail frame with ffmpeg and upload that as --materials "ID:first_frame" instead.`);
   } else {
     console.error(`Use as: --materials "${matId}:ref_image"`);
   }
