@@ -89,6 +89,8 @@ node ${CLAUDE_SKILL_DIR}/ironlabs-cli.mjs task generate \
 | `ironlabs-2.0` | `x-ai/grok-imagine-video` | Video | Default video |
 | `ironlabs-2.0-fast` | `kwaivgi/kling-v3.0-pro` | Video | Fast video |
 | `youmeng-2.0` / `seedance-2.0` / `sd-2.0` | `bytedance/seedance-2.0` | Video | Alt video model |
+| `happyhorse-1.1` | *(MuAPI-only, no OpenRouter equivalent)* | Video | ⚠️ Unverified, no fallback — see MuAPI section |
+| `seedance-2-4k` | *(MuAPI-only, no OpenRouter equivalent)* | Video | Genuine 4K, priced ~$1.35/s. ⚠️ Unverified, no fallback — see MuAPI section |
 | `nano-banana-2` | `google/gemini-3.1-flash-image-preview` | Image | Default image |
 | `nano-banana-pro` | `google/gemini-3.1-flash-image-preview` | Image | Currently maps to the same model as `nano-banana-2` |
 | `midjourney-v7` | `google/gemini-3.1-flash-image-preview` | Image | Artistic |
@@ -116,6 +118,7 @@ node ${CLAUDE_SKILL_DIR}/ironlabs-cli.mjs task generate \
 | `--ratio` | Aspect ratio: 16:9, 9:16, 1:1, 4:3, 3:4 | `1:1` |
 | `--materials` | Comma-separated `<mat-id:role>` pairs | — |
 | `--model` | Model alias or OpenRouter path | `ironlabs-2.0` |
+| `--resolution` | `1k`/`2k`/`4k` (or `720p`/`1080p` directly). Capped at `1080p` for every model **except `seedance-2-4k`**, which passes `4k`/`2k` through unchanged — see the MuAPI section's "When to route to `seedance-2-4k`" | `720p` |
 | `--tags` | Project tags | — |
 
 ### Image Generation
