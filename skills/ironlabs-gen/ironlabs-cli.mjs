@@ -350,7 +350,16 @@ var IronlabsClient = class {
     if (params.materials?.some(m => m.role === "ref_video")) {
       throw new ApiError(400, {}, `ref_video has no effect on "${params.model}" — MuAPI's video_submit tool has no video-input field. Use --model veo-3.1-extend (or veo-3.1-extend-fast) for real motion continuation, or extract a tail frame with ffmpeg and pass it as --materials "ID:first_frame" instead.`);
     }
-    const firstFrame = params.materials?.find(m => m.role === "first_frame" || m.role === "ref_image");
+    if (params.materials?.some(m => m.role === "last_frame")) {
+      throw new ApiError(400, {}, `last_frame has no effect on "${params.model}" — MuAPI's video_submit tool has no last-frame interpolation field for this model. Remove the --materials "ID:last_frame" entry.`);
+    }
+    // Only one image input is actually sent below (image_url) — reject silently-dropped
+    // extras instead of quietly ignoring everything but the first.
+    const imageInputs = params.materials?.filter(m => m.role === "first_frame" || m.role === "ref_image") || [];
+    if (imageInputs.length > 1) {
+      throw new ApiError(400, {}, `"${params.model}" only accepts a single image input, got ${imageInputs.length} — MuAPI's video_submit tool for this model has no multi-reference field. Remove the extra --materials "ID:first_frame"/"ID:ref_image" entries.`);
+    }
+    const firstFrame = imageInputs[0];
     const muapiArgs = {
       prompt: params.prompt,
       model: muapiModel,

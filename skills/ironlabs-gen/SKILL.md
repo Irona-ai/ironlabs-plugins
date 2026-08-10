@@ -36,10 +36,12 @@ MuAPI is attempted for the resolved model only when it appears in `MUAPI_MODEL_I
 
 | Alias | Resolved model | MuAPI `model` value | Status |
 |---|---|---|---|
-| `youmeng-2.0` / `seedance-2.0` / `sd-2.0` | `bytedance/seedance-2.0` | `seedance-2.0` | **Confirmed** working against the live connector |
+| `youmeng-2.0` / `seedance-2.0` / `sd-2.0` | `bytedance/seedance-2.0` | *(omitted — this is MuAPI's implicit default, and the one call shape confirmed working)* | **Confirmed** working against the live connector |
 | `ironlabs-2.0` (default) | `x-ai/grok-imagine-video` | `grok-imagine-video` | ⚠️ **UNVERIFIED** — best-guess slug, not confirmed against the live IronLabs `/mcp/muapi` connector |
 | `ironlabs-2.0-fast` | `kwaivgi/kling-v3.0-pro` | `kling-v3.0-pro` | ⚠️ **UNVERIFIED** — same caveat |
 | `happyhorse-1.1` | *(MuAPI-only, no OpenRouter equivalent)* | `happyhorse-1.1` | ⚠️ **UNVERIFIED**, and has **no fallback** — a submit failure is a hard error, not a graceful degrade |
+
+The `model` field is deliberately omitted for `bytedance/seedance-2.0` rather than sent as `"seedance-2.0"` — that no-`model` call shape is the one confirmed working against the live connector, and sending an untested field risks regressing it if the schema rejects unrecognized properties. It's only included for the unverified entries, where it's required to have any chance of hitting the right backend.
 
 **Why "unverified" is safe to ship for the OR-backed models but risky in principle**: `canTryMuapiVideo()`'s caller falls back to OpenRouter automatically on any 4xx submit failure, so if MuAPI rejects an unrecognized `model` value, generation still succeeds via OpenRouter with the correct model — no user-visible breakage. The theoretical risk is the connector *accepting* a wrong/unrecognized `model` value and silently rendering on a different backend than requested (this exact failure mode is why the seedance-2.0-only version of this gate existed before). `happyhorse-1.1` has no such safety net since it has no OpenRouter fallback path at all.
 
