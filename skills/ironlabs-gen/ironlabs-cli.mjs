@@ -169,6 +169,11 @@ const MUAPI_ONLY_VIDEO_MODEL_MAP = {
   "happyhorse-1.1": "happyhorse-1.1",
 };
 
+// Video models top out at 1080p — "4k"/"2k"/"1k" are accepted as convenience aliases and
+// downgraded/normalized to 720p/1080p. Shared by every video path (OpenRouter and
+// MuAPI-only) via resolveVideoResolution() so they don't drift out of sync.
+const VIDEO_RESOLUTION_ALIAS_MAP = { "1k": "720p", "2k": "1080p", "4k": "1080p" };
+
 const RATIO_TO_IMAGE_SIZE = {
   "1:1":  "1024x1024",
   "16:9": "1536x1024",
@@ -300,6 +305,13 @@ var IronlabsClient = class {
   mapFalModel(model) {
     return FAL_VIDEO_MODEL_MAP[model] || model;
   }
+  resolveVideoResolution(resolution) {
+    const resolved = VIDEO_RESOLUTION_ALIAS_MAP[resolution] || resolution;
+    if (resolution === "4k") {
+      console.error(`Note: video models support up to 1080p — "4k" will render at 1080p, not 4k.`);
+    }
+    return resolved;
+  }
   // MuAPI is only attempted when the resolved model has a MUAPI_MODEL_ID entry — routing
   // an unmapped model through it would either submit-fail with no OR equivalent to identify
   // it by, or (worse) render with an unintended backend while the task record still claims
@@ -366,7 +378,7 @@ var IronlabsClient = class {
       ...(firstFrame?._dataUri ? { image_url: firstFrame._dataUri } : {}),
       ...(params.duration ? { duration: parseInt(params.duration) } : {}),
       ...(params.ratio ? { aspect_ratio: params.ratio } : {}),
-      resolution: params.resolution === "1080p" ? "1080p" : "720p",
+      resolution: params.resolution ? this.resolveVideoResolution(params.resolution) : "720p",
     };
     console.log(`Submitting video via MuAPI connector (${muapiModel})...`);
     const submitResult = await this.mcpCall("muapi", "video_submit", muapiArgs);
@@ -484,15 +496,7 @@ var IronlabsClient = class {
       }
       if (params.duration) orArgs.duration = parseInt(params.duration);
       if (params.ratio)    orArgs.aspect_ratio = params.ratio;
-      if (params.resolution) {
-        // Video models top out at 1080p — "4k" is accepted for convenience but downgraded.
-        const resMap = { "1k": "720p", "2k": "1080p", "4k": "1080p" };
-        const resolved = resMap[params.resolution] || params.resolution;
-        if (params.resolution === "4k") {
-          console.error(`Note: video models support up to 1080p — "4k" will render at 1080p, not 4k.`);
-        }
-        orArgs.resolution = resolved;
-      }
+      if (params.resolution) orArgs.resolution = this.resolveVideoResolution(params.resolution);
 
       // MuAPI-first: try MuAPI before OpenRouter, but only when the resolved model has a
       // MUAPI_MODEL_ID entry (see the UNVERIFIED caveat there) and the request doesn't
