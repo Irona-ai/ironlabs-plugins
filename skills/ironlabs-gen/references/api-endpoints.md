@@ -154,17 +154,18 @@ models) and `MUAPI_ONLY_VIDEO_MODEL_MAP` (models with no OpenRouter equivalent),
 
 | Resolved model | `model` sent to MuAPI | Max resolution | Verified? | Falls back to OpenRouter on failure? |
 |---|---|---|---|---|
-| `bytedance/seedance-2.0` | *(omitted — confirmed working as MuAPI's implicit default)* | 1080p | ✅ Confirmed | Yes |
-| `x-ai/grok-imagine-video` | `grok-imagine-video` | 1080p | ⚠️ Unverified guess | Yes |
-| `kwaivgi/kling-v3.0-pro` | `kling-v3.0-pro` | 1080p | ⚠️ Unverified guess | Yes |
-| `happyhorse-1.1` (no OR model) | `happyhorse-1.1` | 1080p | ⚠️ Unverified guess | **No — hard error** |
-| `seedance-2-4k` (no OR model) | `seedance-2-vip-text-to-video-4k` | **4K** | ⚠️ Unverified guess | **No — hard error** |
+| `bytedance/seedance-2.0` | *(omitted — confirmed working as MuAPI's implicit default)* | 1080p | ✅ Confirmed. `muapi-connector` deployment also now validates `aspect_ratio` server-side — only `16:9`/`9:16`/`4:3`/`3:4` accepted, `1:1` 422s and falls back to OpenRouter | Yes |
+| `x-ai/grok-imagine-video` | `grok-imagine-text-to-video` | 1080p | ✅ Confirmed working — tested against the `muapi-connector` preview deployment, incl. polled to `status: completed` with a real output URL. Requires `duration >= 6` (shorter durations 422 and fall back to OpenRouter) | Yes |
+| `kwaivgi/kling-v3.0-pro` | `kling-v3.0-pro-text-to-video` | 1080p | ✅ Confirmed working — same deployment, polled to completion. Requires `duration >= 5` | Yes |
+| `happyhorse-1.1` (no OR model) | `happyhorse-1.1` | 1080p | 🚫 Confirmed still unsupported — not in the backend's model allow-list | **No — hard error** |
+| `seedance-2-4k` (no OR model) | `seedance-2-vip-text-to-video-4k` | **4K** | 🚫 Confirmed still unsupported — not in the backend's model allow-list | **No — hard error** |
 
 The `model` field is omitted entirely for `bytedance/seedance-2.0` rather than sent as
 `"seedance-2.0"` — that call shape (no `model` field) is the one confirmed working against the
 live connector, and adding an untested field risks regressing it if the schema rejects unknown
-properties. It's only added for the unverified entries, where it's required to have any chance
-of hitting the intended backend.
+properties. It's included for grok/kling (now confirmed) and for the still-unverified
+`happyhorse-1.1`/`seedance-2-4k` entries, where it's required to have any chance of hitting the
+intended backend.
 
 Every model above caps `resolution` at `1080p` — **except `seedance-2-4k`**, which passes
 `4k`/`2k` through to MuAPI unchanged instead of downgrading, since MuAPI's public pricing page
@@ -173,12 +174,13 @@ The exact resolution string that tier expects is itself unverified.
 
 Any other requested model skips MuAPI entirely and goes straight to OpenRouter, since MuAPI
 would otherwise risk silently rendering with the wrong model while the task record still
-showed the caller-selected one. For the unverified entries, a submit failure (4xx) falls
-straight through to the OpenRouter path with no user-visible error, just a stderr note — this
-is what makes shipping the guess safe for models that *have* an OpenRouter fallback. It is
-**not** safe for `happyhorse-1.1` or `seedance-2-4k`, neither of which has one; confirm the real
-`model` identifier and connector behavior with whoever owns the IronLabs `/mcp/muapi` backend
-before relying on either in production (see the checklist in `SKILL.md`'s MuAPI section).
+showed the caller-selected one. Grok/kling submit failures (e.g. a too-short `duration`, or an
+image-to-video request — MuAPI's i2v slugs like `grok-imagine-image-to-video` aren't wired into
+`MUAPI_MODEL_ID` yet) still fall straight through to the OpenRouter path with no user-visible
+error, just a stderr note. That fallback is **not** available for `happyhorse-1.1` or
+`seedance-2-4k`, neither of which has an OpenRouter equivalent; confirm the real `model`
+identifier and connector behavior with whoever owns the IronLabs `/mcp/muapi` backend before
+relying on either in production (see the checklist in `SKILL.md`'s MuAPI section).
 
 **Request — submit:**
 ```json

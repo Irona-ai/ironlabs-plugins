@@ -30,7 +30,7 @@ Uses `ironlabs-cli.mjs` — same CLI interface as the IronLabs plugin, adapted f
 The **OpenRouter** external connector must be connected in IronLabs (**Settings → Connectors → OpenRouter**).
 Visual analysis (material-ingest) shells out to `visual-analysis`'s script, which runs natively via Irona's LLM gateway — no OpenRouter connector or additional setup needed.
 
-**MuAPI-first for video**: video generation tries the **MuAPI** connector first, falling back to OpenRouter automatically on any submit failure (for models that have an OpenRouter equivalent — see below). This is transparent — no flag needed. It only applies to plain text-to-video / single-first-frame image-to-video (no `last_image_url` interpolation or multi-reference support on MuAPI yet, so those requests skip straight to OpenRouter).
+**MuAPI-first for video**: video generation tries the **MuAPI** connector first, falling back to OpenRouter automatically on a confirmed 4xx submit rejection (for models that have an OpenRouter equivalent — see below). Anything else — a network drop, a malformed response, a missing request id — leaves MuAPI's job state unknown, so it's surfaced as an error instead of silently retrying and risking a duplicate render on both providers. This is transparent — no flag needed. It only applies to plain text-to-video / single-first-frame image-to-video (no `last_image_url` interpolation or multi-reference support on MuAPI yet, so those requests skip straight to OpenRouter).
 
 MuAPI is attempted for the resolved model only when it appears in `MUAPI_MODEL_ID` (`ironlabs-cli.mjs`):
 
