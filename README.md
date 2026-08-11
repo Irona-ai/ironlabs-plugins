@@ -1,6 +1,6 @@
 # ironlabs-plugin
 
-AI video production skills by IronLabs — creative direction, generation, analysis, e-commerce content, and download.
+AI video production skills by IronLabs — creative direction, generation, analysis, e-commerce content, websites, and download.
 
 ## Skills
 
@@ -9,6 +9,7 @@ AI video production skills by IronLabs — creative direction, generation, analy
 | **director** | Creative director — single entry point for all video creation (product ads, short films, TikTok e-commerce, drama, comedy) |
 | **visual-analysis** | Visual understanding & multimodal analysis (product analysis, video script extraction, style extraction) |
 | **ironlabs-gen** | AI video & image generation engine — material pool, product design sheets, scene backgrounds |
+| **3d-website** | One prompt → a cinematic scroll-driven website — chained keyframes, seamless video legs, scroll-scrub build |
 | **video-download** | Video downloader (yt-dlp + Douyin/TikTok fallback) |
 
 ## Installation

@@ -13,7 +13,7 @@ description: >
 allowed-tools: Bash, Read, Write, Glob
 metadata:
   author: ironlabs
-  version: 0.2.1
+  version: 0.3.0
   category: video-production
   tags: [video-generation, image-generation, openrouter, material-pool]
 ---
@@ -95,6 +95,38 @@ node ${CLAUDE_SKILL_DIR}/ironlabs-cli.mjs task generate \
   --prompt "..." --model nano-banana-2 --ratio 16:9
 ```
 
+### Downloading a Result
+
+`task generate` returns a task whose result lives on a remote URL. To get the file on disk:
+
+```bash
+TASK=$(node ${CLAUDE_SKILL_DIR}/ironlabs-cli.mjs task generate \
+  --prompt "..." --model nano-banana-2 --ratio 16:9 | jq -r '.taskId')
+node ${CLAUDE_SKILL_DIR}/ironlabs-cli.mjs task download "$TASK" --out media/shot.png
+# stdout: {"path":"media/shot.png","bytes":...,"type":"image"}
+```
+
+Use `task download` when you want the file; use `task chain` when you want the result re-uploaded as
+a material for the next generation.
+
+### Local Post-Processing (`media`)
+
+The `media` domain is pure local ffmpeg — no API key, no network, nothing billed. Requires `ffmpeg`
++ `ffprobe` on PATH.
+
+```bash
+# Extract a clip's TRUE last frame — the seam handoff for chained shots
+node ${CLAUDE_SKILL_DIR}/ironlabs-cli.mjs media lastframe --video leg_0.mp4 --out leg_0-last.png
+
+# Transcode clips into blob-seekable scrub mp4s + webp posters (small GOP, faststart)
+node ${CLAUDE_SKILL_DIR}/ironlabs-cli.mjs media encode --clips "a.mp4,b.mp4" --out-dir scenes
+
+# Concatenate clips into one preview mp4
+node ${CLAUDE_SKILL_DIR}/ironlabs-cli.mjs media stitch --clips "a.mp4,b.mp4" --preview-out preview.mp4
+```
+
+Run `ironlabs-cli.mjs media help` for all flags.
+
 ---
 
 ## Material Roles
@@ -105,6 +137,8 @@ First upload a file to get a material ID, then reference it by ID.
 |------|---------------------|--------------|
 | Reference image | `<id>:ref_image` | Style/environment guidance |
 | First frame | `<id>:first_frame` | Pin opening composition |
+| Last frame | `<id>:last_frame` | Pin closing composition — the model interpolates first→last |
+| Reference video | `<id>:ref_video` | Continue an existing clip's motion (`--model veo-3.1-extend` only) |
 
 ```bash
 # Upload material first

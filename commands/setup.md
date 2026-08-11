@@ -147,12 +147,15 @@ Tell the user:
 > - `director` — AI video creative director (entry point for all video creation)
 > - `ironlabs-gen` — video and image generation
 > - `visual-analysis` — visual analysis and multimodal understanding
+> - `3d-website` — one prompt → a cinematic scroll-driven website
 > - `video-download` — download videos from YouTube, TikTok, and 1000+ platforms
 >
 > Some skills require external connectors configured at **Settings → Connectors** in IronLabs:
 >
 > | Skill | Connector | What it enables |
 > |-------|-----------|-----------------|
-> | `ironlabs-gen`, `director` | OpenRouter | Video/image generation |
+> | `ironlabs-gen`, `director`, `3d-website` | OpenRouter | Video/image generation |
 >
 > `visual-analysis` needs no external connector — it runs natively through Irona's LLM gateway.
+>
+> `3d-website` additionally needs `ffmpeg` on your PATH (macOS: `brew install ffmpeg`).

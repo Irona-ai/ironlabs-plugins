@@ -5,9 +5,9 @@
   "plugins": [
     {
       "name": "ironlabs",
-      "version": "0.2.1",
+      "version": "0.3.0",
       "source": "./",
-      "description": "AI skills for video production including creative direction, generation, editing, and e-commerce content creation"
+      "description": "AI skills for video production including creative direction, generation, editing, e-commerce content creation, and scroll-driven websites"
     }
   ]
 }

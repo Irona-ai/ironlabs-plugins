@@ -361,7 +361,7 @@ var IronlabsClient = class {
       if (params.resolution) {
         console.error(`Note: --resolution has no effect on image generation — image size is controlled by --ratio. Ignoring "${params.resolution}".`);
       }
-      console.log(`Generating image via OpenRouter connector (${model})...`);
+      console.error(`Generating image via OpenRouter connector (${model})...`);
       const orResult = await this.mcpCall("openrouter", "image_generate", orArgs);
       // Extract image URL from chat-completion response (modalities: image+text)
       const choice = orResult.choices?.[0]?.message;
@@ -434,7 +434,7 @@ var IronlabsClient = class {
         }
         orArgs.resolution = resolved;
       }
-      console.log(`Submitting video via OpenRouter connector (${model})...`);
+      console.error(`Submitting video via OpenRouter connector (${model})...`);
       const submitResult = await this.mcpCall("openrouter", "video_submit", orArgs);
       const generationId = submitResult.id;
       if (!generationId) throw new ApiError(500, submitResult, "OpenRouter connector did not return a generation id");
@@ -655,8 +655,10 @@ var IronlabsClient = class {
 };
 
 // src/cli.ts
-import { extname, basename } from "path";
+import { extname, basename, dirname } from "path";
 import { fileURLToPath } from "url";
+import { spawn } from "child_process";
+import { existsSync, rmSync, renameSync } from "fs";
 var __dir = fileURLToPath(new URL(".", import.meta.url));
 function loadEnv() {
   const candidates = [
@@ -727,6 +729,236 @@ function parseArgs(args) {
   }
   return { flags, positional };
 }
+
+// ---------------------------------------------------------------------------
+// media domain — local ffmpeg post-processing for scroll-scrub websites.
+// No API key and no network: these operate purely on files the task domain
+// already downloaded. ffmpeg + ffprobe must be on PATH.
+// ---------------------------------------------------------------------------
+function runCmd(cmd, args) {
+  return new Promise((resolve, reject) => {
+    const p = spawn(cmd, args, { stdio: ["ignore", "pipe", "pipe"] });
+    let err = "";
+    p.stdout.on("data", () => {});
+    p.stderr.on("data", (d) => { err += d.toString(); });
+    p.on("error", (e) => reject(
+      e.code === "ENOENT"
+        ? new Error(`${cmd} not found on PATH — install ffmpeg (brew install ffmpeg / apt install ffmpeg)`)
+        : e
+    ));
+    p.on("close", (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(`${cmd} exited ${code}: ${err.slice(-500)}`));
+    });
+  });
+}
+const runFfmpeg = (args) => runCmd("ffmpeg", args);
+
+function probeInfo(file) {
+  return new Promise((resolve, reject) => {
+    const p = spawn("ffprobe", [
+      "-v", "error",
+      "-select_streams", "v:0",
+      "-show_entries", "stream=width:format=duration",
+      "-of", "json",
+      file,
+    ], { stdio: ["ignore", "pipe", "pipe"] });
+    let o = "";
+    let e = "";
+    p.stdout.on("data", (d) => { o += d.toString(); });
+    p.stderr.on("data", (d) => { e += d.toString(); });
+    p.on("error", (err) => reject(
+      err.code === "ENOENT"
+        ? new Error("ffprobe not found on PATH — install ffmpeg")
+        : err
+    ));
+    p.on("close", () => {
+      try {
+        const j = JSON.parse(o);
+        resolve({
+          width: Number(j.streams?.[0]?.width) || 0,
+          duration: Number(j.format?.duration) || 0,
+        });
+      } catch {
+        reject(new Error(`ffprobe failed for ${file}: ${e.slice(-300)}`));
+      }
+    });
+  });
+}
+
+function mediaDie(msg) {
+  console.error(`Error: ${msg}`);
+  process.exit(1);
+}
+function requireFiles(list, label) {
+  for (const p of list) {
+    if (!existsSync(p)) mediaDie(`${label}: file not found: ${p}`);
+  }
+}
+function splitList(value) {
+  return String(value).split(",").map((s) => s.trim()).filter(Boolean);
+}
+function pad4(n) {
+  return String(n).padStart(4, "0");
+}
+// Homebrew's default ffmpeg ships without libwebp, so this fires on real user
+// machines (not just exotic builds). Say what to install instead of dumping a
+// 500-char ffmpeg tail.
+function isMissingWebpEncoder(err) {
+  return /Unknown encoder 'libwebp'|Encoder not found/.test(String(err?.message || err));
+}
+const WEBP_HINT = "this ffmpeg build has no libwebp encoder — reinstall with WebP support (macOS: brew install ffmpeg; Debian/Ubuntu: apt install ffmpeg libwebp-dev)";
+
+// Extracts a clip's TRUE final frame. This is the seam handoff for a continuous
+// camera flight: leg i must START on leg i-1's real last frame, never on a
+// re-rendered keyframe, or the seam visibly pops.
+async function mediaLastframe(flags) {
+  if (!flags.video || !flags.out) {
+    mediaDie('lastframe requires --video and --out\nUsage: ironlabs media lastframe --video leg_1.mp4 --out leg_1-last.png');
+  }
+  requireFiles([flags.video], "lastframe");
+  mkdirSync(dirname(flags.out), { recursive: true });
+  console.error(`Extracting last frame of ${flags.video}...`);
+  await runFfmpeg(["-y", "-sseof", "-0.1", "-i", flags.video, "-frames:v", "1", "-q:v", "2", flags.out]);
+  if (!existsSync(flags.out)) mediaDie(`lastframe produced no output for ${flags.video}`);
+  json({ path: flags.out });
+}
+
+// Transcodes generated legs into blob-seekable per-scene scrub mp4s (small GOP
+// so scroll seeks land instantly, faststart, no audio, light sharpen) plus a
+// first-frame .webp poster each. These are what scrub-engine.js consumes.
+async function mediaEncode(flags) {
+  if (!flags.clips || !flags["out-dir"]) {
+    mediaDie('encode requires --clips and --out-dir\nUsage: ironlabs media encode --clips "leg_0.mp4,leg_1.mp4" --out-dir media/scenes');
+  }
+  const clips = splitList(flags.clips);
+  if (!clips.length) mediaDie("encode: no clips provided");
+  requireFiles(clips, "encode");
+
+  const outDir = flags["out-dir"];
+  const prefix = flags.prefix || "scene";
+  const crf = flags.crf ? String(Number(flags.crf)) : "20";
+  const gop = flags.gop ? String(Number(flags.gop)) : "8";
+  const maxWidth = flags.width ? Number(flags.width) : 0;
+  const posterQuality = flags["poster-quality"] ? String(Number(flags["poster-quality"])) : "84";
+  mkdirSync(outDir, { recursive: true });
+
+  const results = [];
+  for (let ci = 0; ci < clips.length; ci++) {
+    const clip = clips[ci];
+    const info = await probeInfo(clip);
+    const scale = maxWidth && info.width && maxWidth < info.width
+      ? `scale=${maxWidth}:-2:flags=lanczos,`
+      : "";
+    const n = ci + 1;
+    const mp4 = `${outDir}/${prefix}_${n}.mp4`;
+    const poster = `${outDir}/${prefix}_${n}.webp`;
+    console.error(`Encoding scene ${n}/${clips.length} from ${clip}...`);
+    await runFfmpeg([
+      "-y", "-i", clip, "-an",
+      "-vf", `${scale}unsharp=5:5:0.8:5:5:0.0`,
+      "-c:v", "libx264", "-preset", "slow", "-crf", crf,
+      "-pix_fmt", "yuv420p",
+      "-g", gop, "-keyint_min", gop, "-sc_threshold", "0",
+      "-movflags", "+faststart",
+      mp4,
+    ]);
+    if (!existsSync(mp4)) mediaDie(`encode produced no mp4 for ${clip}`);
+    try {
+      await runFfmpeg([
+        "-y", "-i", clip, "-frames:v", "1",
+        "-vf", scale.replace(/,$/, "") || "null",
+        "-c:v", "libwebp", "-quality", posterQuality, "-lossless", "0",
+        poster,
+      ]);
+    } catch (e) {
+      // A missing poster degrades to a black first paint, not a broken page — warn and continue.
+      const why = isMissingWebpEncoder(e) ? WEBP_HINT : String(e.message || e).slice(-120);
+      console.error(`Note: poster skipped for ${clip} — ${why}`);
+    }
+    results.push({ mp4, poster: existsSync(poster) ? poster : null });
+  }
+  json({ out_dir: outDir, count: results.length, clips: results });
+}
+
+// Concatenates the legs into one preview mp4 and (optionally) a webp frame
+// sequence. Frame 1 of every leg after the first is dropped — it is a duplicate
+// of the previous leg's last frame, which is exactly the seam.
+async function mediaStitch(flags) {
+  if (!flags.clips) {
+    mediaDie('stitch requires --clips\nUsage: ironlabs media stitch --clips "leg_0.mp4,leg_1.mp4" --preview-out media/preview.mp4 [--out-dir frames/]');
+  }
+  const clips = splitList(flags.clips);
+  if (!clips.length) mediaDie("stitch: no clips provided");
+  requireFiles(clips, "stitch");
+
+  const outDir = flags["out-dir"] || null;
+  let globalIndex = 0;
+  if (outDir) {
+    const maxWidth = flags.width ? Number(flags.width) : 2560;
+    const quality = flags.quality ? Number(flags.quality) : 84;
+    const perClip = flags["per-clip-frames"] ? Number(flags["per-clip-frames"]) : 120;
+    mkdirSync(outDir, { recursive: true });
+    for (let ci = 0; ci < clips.length; ci++) {
+      const clip = clips[ci];
+      const info = await probeInfo(clip);
+      const targetWidth = info.width ? Math.min(maxWidth, info.width) : maxWidth;
+      const fps = perClip / info.duration;
+      const tmp = `${outDir}/_tmp_${ci}`;
+      rmSync(tmp, { recursive: true, force: true });
+      mkdirSync(tmp, { recursive: true });
+      console.error(`Extracting frames ${ci + 1}/${clips.length} from ${clip} (${targetWidth}px, ${fps.toFixed(3)}fps)...`);
+      try {
+        await runFfmpeg([
+          "-y", "-i", clip,
+          "-vf", `scale=${targetWidth}:-2:flags=lanczos,fps=${fps.toFixed(4)}`,
+          "-frames:v", String(perClip),
+          "-c:v", "libwebp", "-quality", String(quality), "-lossless", "0",
+          "-f", "image2", `${tmp}/f_%04d.webp`,
+        ]);
+      } catch (e) {
+        rmSync(tmp, { recursive: true, force: true });
+        // Unlike a poster, frames ARE the deliverable here — fail loudly, but readably.
+        mediaDie(isMissingWebpEncoder(e)
+          ? `stitch --out-dir needs WebP frames but ${WEBP_HINT}.\nDrop --out-dir to produce just the concatenated preview mp4, which scrub-engine.js can scrub on its own.`
+          : `stitch: frame extraction failed for ${clip} — ${String(e.message || e).slice(-300)}`);
+      }
+      // Skip frame 1 on every leg but the first — it duplicates the seam frame.
+      const startFrame = ci === 0 ? 1 : 2;
+      for (let fi = startFrame; fi <= perClip; fi++) {
+        const src = `${tmp}/f_${pad4(fi)}.webp`;
+        if (!existsSync(src)) break;
+        globalIndex++;
+        renameSync(src, `${outDir}/frame_${pad4(globalIndex)}.webp`);
+      }
+      rmSync(tmp, { recursive: true, force: true });
+    }
+    if (globalIndex === 0) mediaDie("stitch produced no frames");
+  }
+
+  const previewOut = flags["preview-out"] || "media/preview.mp4";
+  mkdirSync(dirname(previewOut), { recursive: true });
+  const pargs = ["-y"];
+  for (const clip of clips) pargs.push("-i", clip);
+  const parts = [];
+  let labels = "";
+  for (let i = 0; i < clips.length; i++) {
+    parts.push(`[${i}:v]scale=1280:-2,fps=30,format=yuv420p,setsar=1[v${i}]`);
+    labels += `[v${i}]`;
+  }
+  const filter = `${parts.join(";")};${labels}concat=n=${clips.length}:v=1:a=0[outv]`;
+  console.error(`Concatenating ${clips.length} clip(s) → ${previewOut}...`);
+  await runFfmpeg([
+    ...pargs,
+    "-filter_complex", filter, "-map", "[outv]", "-an",
+    "-movflags", "+faststart",
+    "-c:v", "libx264", "-profile:v", "high", "-pix_fmt", "yuv420p",
+    "-g", "8", "-keyint_min", "8", "-sc_threshold", "0", "-crf", "28",
+    previewOut,
+  ]);
+  json({ preview: previewOut, frames_dir: outDir, frame_count: globalIndex });
+}
+
 var HELP = `
 IRONLABS CLI — AI generation task management
 
@@ -739,6 +971,7 @@ Domains:
   asset       Save and manage asset files (image/video) for generation anchoring
   character   Save and manage character reference images for identity consistency
   credit      Check balance and estimate task cost
+  media       Local ffmpeg post-processing (seam frames, scrub encodes, stitching)
 
 Environment:
   IRONLABS_API_KEY   IronLabs API key — all requests (balance, generation, uploads)
@@ -775,6 +1008,7 @@ Commands:
   cancel <id>                 Cancel a task (no-op for synchronous tasks)
   chain <id>                  Download completed task result → upload as material (first_frame chaining for any
                                model, or ref_video — only usable with --model veo-3.1-extend/-fast)
+  download <id> --out <path>  Download completed task result straight to a local file (no material upload)
   tags                        List all your tags
   tag <id> --tags a,b,c       Update tags on a task
 
@@ -898,6 +1132,41 @@ Examples:
   ironlabs asset create /path/to/product.jpg
   ironlabs asset create /path/to/clip.mp4 --type video
   ironlabs asset delete 1234567890
+`.trim();
+var HELP_MEDIA = `
+ironlabs media — Local ffmpeg post-processing (no API key, no network)
+
+Requires ffmpeg + ffprobe on PATH.
+
+Commands:
+  lastframe --video <in> --out <png>
+      Extract a clip's TRUE final frame. This is the seam handoff for a continuous
+      camera flight: leg i must start on leg i-1's real last frame, never on a
+      re-rendered keyframe, or the seam visibly pops.
+
+  encode --clips "a.mp4,b.mp4" --out-dir <dir>
+      Transcode legs into blob-seekable per-scene scrub mp4s (small GOP so scroll
+      seeks land instantly, faststart, no audio, light sharpen) + a first-frame
+      .webp poster each. Writes <dir>/<prefix>_1.mp4, <dir>/<prefix>_1.webp, ...
+      --prefix <name>          Output basename (default: scene)
+      --crf <n>                x264 quality, lower = better (default: 20)
+      --gop <n>                Keyframe interval — small = smooth seeking (default: 8)
+      --width <px>             Downscale cap; omit to keep native width
+      --poster-quality <n>     WebP poster quality (default: 84)
+
+  stitch --clips "a.mp4,b.mp4" [--preview-out <mp4>] [--out-dir <frames dir>]
+      Concatenate legs into one preview mp4. With --out-dir, also emits a webp
+      frame sequence (frame_0001.webp, ...); frame 1 of every leg after the first
+      is dropped because it duplicates the previous leg's last frame.
+      --preview-out <path>     Concatenated mp4 (default: media/preview.mp4)
+      --per-clip-frames <n>    Frames sampled per clip (default: 120)
+      --width <px>             Max frame width (default: 2560)
+      --quality <n>            WebP quality (default: 84)
+
+Examples:
+  ironlabs media lastframe --video media/leg_0.mp4 --out media/leg_0-last.png
+  ironlabs media encode --clips "media/leg_0.mp4,media/leg_1.mp4" --out-dir media/scenes
+  ironlabs media stitch --clips "media/leg_0.mp4,media/leg_1.mp4" --preview-out media/preview.mp4
 `.trim();
 var HELP_CREDIT = `
 ironlabs credit — Balance and cost estimation
@@ -1042,6 +1311,40 @@ async function taskChain(client, positional) {
   }
   json(data);
 }
+// Downloads a completed task's result straight to a local path — the file-first
+// counterpart to `task chain`, which instead re-uploads the result as a material.
+async function taskDownload(client, positional, flags) {
+  const id = parseInt(positional[0]);
+  if (!id || !flags.out) {
+    console.error("Error: task ID and --out required.\nUsage: ironlabs task download <id> --out media/key_0.png");
+    process.exit(1);
+  }
+  const result = await client.getTaskResult(id);
+  const url = result.videoUrl || result.imageUrl;
+  if (!url) {
+    console.error(`Task #${id} has no video or image result (status: ${result.status}). Run "ironlabs task wait ${id}" first.`);
+    process.exit(1);
+  }
+  const isVideo = !!result.videoUrl;
+  let buffer;
+  if (isVideo) {
+    // OpenRouter video URLs need gateway auth — go through the video_download connector.
+    const dlResult = await client.mcpCall("openrouter", "video_download", { url });
+    if (!dlResult.data_base64) throw new Error("video_download returned no data");
+    buffer = Buffer.from(dlResult.data_base64, "base64");
+    await refreshBalanceCache(client);
+  } else if (url.startsWith("data:")) {
+    buffer = Buffer.from(url.slice(url.indexOf(",") + 1), "base64");
+  } else {
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error(`Download failed: ${resp.status}`);
+    buffer = Buffer.from(await resp.arrayBuffer());
+  }
+  mkdirSync(dirname(flags.out), { recursive: true });
+  writeFileSync(flags.out, buffer);
+  console.error(`Downloaded ${(buffer.byteLength / 1024 / 1024).toFixed(2)}MB → ${flags.out}`);
+  json({ path: flags.out, bytes: buffer.byteLength, type: isVideo ? "video" : "image" });
+}
 async function taskTags(client) {
   json(await client.listTags());
 }
@@ -1076,12 +1379,12 @@ async function materialUpload(client, positional, flags) {
   const type = flags.type || (videoExts.includes(ext) ? "video" : "image");
   const buffer = readFileSync(filePath);
   const filename = basename(filePath);
-  console.log(`Uploading ${filename} (${type}, ${(buffer.byteLength / 1024).toFixed(1)}KB)...`);
+  console.error(`Uploading ${filename} (${type}, ${(buffer.byteLength / 1024).toFixed(1)}KB)...`);
   const data = await client.uploadMaterial(buffer, filename, type);
   if (data.action === "exists") {
-    console.log(`Material already exists: #${data.material.id}`);
+    console.error(`Material already exists: #${data.material.id}`);
   } else {
-    console.log(`Material uploaded: #${data.material.id}`);
+    console.error(`Material uploaded: #${data.material.id}`);
   }
   json(data);
 }
@@ -1108,9 +1411,9 @@ async function characterCreate(client, positional, flags) {
   }
   const buffer = readFileSync(filePath);
   const filename = basename(filePath);
-  console.log(`Creating character from ${filename} (${(buffer.byteLength / 1024).toFixed(1)}KB)...`);
+  console.error(`Creating character from ${filename} (${(buffer.byteLength / 1024).toFixed(1)}KB)...`);
   const data = await client.importCharacters(buffer, filename);
-  console.log(`Character #${data.character.id} created — use as: --characters "${data.character.id}:reference_image"`);
+  console.error(`Character #${data.character.id} created — use as: --characters "${data.character.id}:reference_image"`);
   json(data);
 }
 async function characterGrant(client, positional) {
@@ -1128,9 +1431,9 @@ async function assetCreate(client, positional, flags) {
   const type = flags.type || (videoExts.includes(ext) ? "video" : "image");
   const buffer = readFileSync(filePath);
   const filename = basename(filePath);
-  console.log(`Creating asset from ${filename} (${type}, ${(buffer.byteLength / 1024).toFixed(1)}KB)...`);
+  console.error(`Creating asset from ${filename} (${type}, ${(buffer.byteLength / 1024).toFixed(1)}KB)...`);
   const data = await client.createAsset(buffer, filename, type);
-  console.log(`Asset #${data.asset.id} created — use as: --materials "asset:${data.asset.id}:ref_image"`);
+  console.error(`Asset #${data.asset.id} created — use as: --materials "asset:${data.asset.id}:ref_image"`);
   json(data);
 }
 async function assetRegister(client, positional, flags) {
@@ -1215,7 +1518,8 @@ var DOMAIN_HELP = {
   material: HELP_MATERIAL,
   asset: HELP_ASSET,
   character: HELP_CHARACTER,
-  credit: HELP_CREDIT
+  credit: HELP_CREDIT,
+  media: HELP_MEDIA
 };
 async function main() {
   const args = process.argv.slice(2);
@@ -1242,10 +1546,11 @@ async function main() {
     return;
   }
   const baseUrlOverride = flags["base-url"] || null;
-  const localOnlyDomains = new Set(["character", "asset"]);
+  // "media" is pure local ffmpeg — never needs an API key.
+  const localOnlyDomains = new Set(["character", "asset", "media"]);
   const client = createClient(baseUrlOverride, localOnlyDomains.has(domain));
   if (baseUrlOverride) {
-    console.log(`ℹ️  Using API: ${baseUrlOverride}`);
+    console.error(`ℹ️  Using API: ${baseUrlOverride}`);
   }
   try {
     switch (domain) {
@@ -1259,6 +1564,7 @@ async function main() {
           case "wait":     await taskWait(client, subPositional, flags); break;
           case "cancel":   await taskCancel(client, subPositional); break;
           case "chain":    await taskChain(client, subPositional); break;
+          case "download": await taskDownload(client, subPositional, flags); break;
           case "tags":     await taskTags(client); break;
           case "tag":      await taskTag(client, subPositional, flags); break;
           default:
@@ -1300,6 +1606,17 @@ async function main() {
           default:
             console.error(`Unknown character action: ${action}\n`);
             console.log(HELP_CHARACTER);
+            process.exit(1);
+        }
+        break;
+      case "media":
+        switch (action) {
+          case "lastframe": await mediaLastframe(flags); break;
+          case "encode":    await mediaEncode(flags); break;
+          case "stitch":    await mediaStitch(flags); break;
+          default:
+            console.error(`Unknown media action: ${action}\n`);
+            console.log(HELP_MEDIA);
             process.exit(1);
         }
         break;
