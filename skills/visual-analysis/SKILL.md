@@ -9,7 +9,7 @@ description: >
 allowed-tools: Bash, Read
 metadata:
   author: ironlabs
-  version: 0.2.1
+  version: 0.3.0
   category: video-production
   tags: [vision, multimodal, analysis]
 ---
