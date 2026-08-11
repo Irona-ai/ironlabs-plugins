@@ -148,30 +148,32 @@ const FAL_VIDEO_MODEL_MAP = {
 // (see MUAPI-first note in createTask()). Keyed by the OR-resolved model id; value is the
 // `model` string sent to MuAPI's video_submit tool.
 //
-// CONFIRMED: as of irona-chat PR #828 ("muapi as connector"), the live IronLabs `/mcp/muapi`
-// connector's video_submit hardcodes `if (model !== 'bytedance/seedance-2.0') throw ...` —
-// only "seedance-2.0" is actually accepted, regardless of what `model` value is sent. The
-// grok-imagine-video and kling-v3.0-pro entries below are known-wrong slugs (MuAPI's real
-// playground ids are "grok-imagine-text-to-video", "kling-v3.0-pro-text-to-video", etc.) AND
-// blocked backend-side even with the correct slug — verified by calling /mcp/muapi directly
-// with "grok-imagine-text-to-video" and getting the same hardcoded rejection. This is safe to
-// leave in only because canTryMuapiVideo()'s caller falls back to OpenRouter on any 4xx submit
-// failure — every ironlabs-2.0 / ironlabs-2.0-fast video request cleanly and silently falls
-// back to OpenRouter today, which is correct. Once irona-chat's muapi connector is extended to
-// support these models, update this map with the real confirmed ids and drop this caveat —
-// do not guess (see the confirmation checklist in SKILL.md's MuAPI section).
+// CONFIRMED (irona-chat "muapi-connector" preview deployment, tested directly against
+// /mcp/muapi's video_submit): the backend now accepts a real allow-list of models —
+// "bytedance/seedance-2.0", "grok-imagine-text-to-video", "grok-imagine-image-to-video",
+// "kling-v3.0-pro-text-to-video", "kling-v3.0-pro-image-to-video",
+// "kling-v3.0-standard-image-to-video", "kling-v2.1-standard-i2v" — up from the old
+// PR #828 build, which hardcoded rejection of everything but "bytedance/seedance-2.0".
+// grok and kling are keyed here to their *text-to-video* slugs (confirmed submitting
+// successfully: grok at duration>=6s only — the connector 422s duration<6 — and kling at
+// duration>=5s). This map has no i2v variant yet: canTryMuapiVideo() also allows requests
+// carrying a single image_url (first_frame), and those would still send the t2v slug —
+// confirmed that gets a clean 4xx ("is text-to-video and does not accept image_url"), so
+// it safely falls back to OpenRouter same as before, just without the MuAPI-first cost
+// savings. Wire up "grok-imagine-image-to-video" / "kling-v3.0-pro-image-to-video" here
+// (keyed by presence of image_url) if that's worth optimizing.
 const MUAPI_MODEL_ID = {
   "bytedance/seedance-2.0":  "seedance-2.0",
-  "x-ai/grok-imagine-video": "grok-imagine-video",
-  "kwaivgi/kling-v3.0-pro":  "kling-v3.0-pro",
+  "x-ai/grok-imagine-video": "grok-imagine-text-to-video",
+  "kwaivgi/kling-v3.0-pro":  "kling-v3.0-pro-text-to-video",
 };
 // MuAPI-only video models with no OpenRouter equivalent — there is nothing to fall back to,
-// so a MuAPI submit failure for these is a hard error, not a graceful degrade. Same
-// UNVERIFIED caveat as MUAPI_MODEL_ID above applies to muapiModel (the identifier sent as
-// `model`) and to the exact resolution string maxResolution: "4k" implies is sent as-is.
-// maxResolution controls what resolveVideoResolution() clamps --resolution to for this model
-// (see below) — most video models top out at 1080p, but MuAPI's VIP Seedance tier genuinely
-// supports 4K per its public pricing page, so seedance-2-4k opts out of the usual 1080p cap.
+// so a MuAPI submit failure for these is a hard error, not a graceful degrade.
+// CONFIRMED still unsupported on the "muapi-connector" preview: neither "happyhorse-1.1" nor
+// "seedance-2-vip-text-to-video-4k" appears in the backend's allow-list above (tested
+// directly against /mcp/muapi — same "does not support model" rejection as before). Leave
+// these MUAPI-only (no safe fallback) until the backend actually adds them — don't route
+// them through OpenRouter speculatively, there's no OR equivalent for either.
 const MUAPI_ONLY_VIDEO_MODEL_MAP = {
   "happyhorse-1.1": { muapiModel: "happyhorse-1.1", maxResolution: "1080p" },
   "seedance-2-4k":  { muapiModel: "seedance-2-vip-text-to-video-4k", maxResolution: "4k" },
