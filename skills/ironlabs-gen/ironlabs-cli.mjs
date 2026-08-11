@@ -148,15 +148,18 @@ const FAL_VIDEO_MODEL_MAP = {
 // (see MUAPI-first note in createTask()). Keyed by the OR-resolved model id; value is the
 // `model` string sent to MuAPI's video_submit tool.
 //
-// UNVERIFIED: only the bytedance/seedance-2.0 → "seedance-2.0" mapping has been confirmed
-// against the live IronLabs `/mcp/muapi` connector. The grok-imagine-video and
-// kling-v3.0-pro entries are best-guess slugs based on MuAPI's public playground (see
-// muapi.ai/playground) — the IronLabs backend connector may expect different identifiers,
-// or may not accept a `model` argument for these at all. This is safe to leave in only
-// because canTryMuapiVideo()'s caller falls back to OpenRouter on any 4xx submit failure —
-// a wrong/rejected guess degrades gracefully instead of silently mis-rendering. Confirm the
-// real identifiers with whoever owns the IronLabs muapi connector backend and update this
-// map accordingly (see the confirmation checklist in SKILL.md's MuAPI section).
+// CONFIRMED: as of irona-chat PR #828 ("muapi as connector"), the live IronLabs `/mcp/muapi`
+// connector's video_submit hardcodes `if (model !== 'bytedance/seedance-2.0') throw ...` —
+// only "seedance-2.0" is actually accepted, regardless of what `model` value is sent. The
+// grok-imagine-video and kling-v3.0-pro entries below are known-wrong slugs (MuAPI's real
+// playground ids are "grok-imagine-text-to-video", "kling-v3.0-pro-text-to-video", etc.) AND
+// blocked backend-side even with the correct slug — verified by calling /mcp/muapi directly
+// with "grok-imagine-text-to-video" and getting the same hardcoded rejection. This is safe to
+// leave in only because canTryMuapiVideo()'s caller falls back to OpenRouter on any 4xx submit
+// failure — every ironlabs-2.0 / ironlabs-2.0-fast video request cleanly and silently falls
+// back to OpenRouter today, which is correct. Once irona-chat's muapi connector is extended to
+// support these models, update this map with the real confirmed ids and drop this caveat —
+// do not guess (see the confirmation checklist in SKILL.md's MuAPI section).
 const MUAPI_MODEL_ID = {
   "bytedance/seedance-2.0":  "seedance-2.0",
   "x-ai/grok-imagine-video": "grok-imagine-video",

@@ -37,8 +37,8 @@ MuAPI is attempted for the resolved model only when it appears in `MUAPI_MODEL_I
 | Alias | Resolved model | MuAPI `model` value | Status |
 |---|---|---|---|
 | `youmeng-2.0` / `seedance-2.0` / `sd-2.0` | `bytedance/seedance-2.0` | *(omitted — this is MuAPI's implicit default, and the one call shape confirmed working)* | **Confirmed** working against the live connector |
-| `ironlabs-2.0` (default) | `x-ai/grok-imagine-video` | `grok-imagine-video` | ⚠️ **UNVERIFIED** — best-guess slug, not confirmed against the live IronLabs `/mcp/muapi` connector |
-| `ironlabs-2.0-fast` | `kwaivgi/kling-v3.0-pro` | `kling-v3.0-pro` | ⚠️ **UNVERIFIED** — same caveat |
+| `ironlabs-2.0` (default) | `x-ai/grok-imagine-video` | `grok-imagine-video` | 🚫 **Confirmed blocked** — the backend connector (irona-chat PR #828) hardcodes rejection of any model but `bytedance/seedance-2.0`; falls back to OpenRouter every time. Slug is also wrong (MuAPI's real id is `grok-imagine-text-to-video`) but that's moot until the backend allowlist changes |
+| `ironlabs-2.0-fast` | `kwaivgi/kling-v3.0-pro` | `kling-v3.0-pro` | 🚫 **Confirmed blocked** — same backend restriction; falls back to OpenRouter every time. Slug also wrong (MuAPI's real id is `kling-v3.0-pro-text-to-video`) |
 | `happyhorse-1.1` | *(MuAPI-only, no OpenRouter equivalent)* | `happyhorse-1.1` | ⚠️ **UNVERIFIED**, and has **no fallback** — a submit failure is a hard error, not a graceful degrade |
 | `seedance-2-4k` | *(MuAPI-only, no OpenRouter equivalent)* | `seedance-2-vip-text-to-video-4k` | ⚠️ **UNVERIFIED**, and has **no fallback**. Genuinely supports up to 4K (opts out of the usual 1080p cap — see below), priced notably higher (~$1.35/s per MuAPI's public pricing) |
 
@@ -50,15 +50,14 @@ The `model` field is deliberately omitted for `bytedance/seedance-2.0` rather th
 - If the user **explicitly** asks for 4K (or "highest quality," "ultra HD," and similar unambiguous high-res asks), use `--model seedance-2-4k --resolution 4k`. **Warn the user first** that this path is unverified and has no OpenRouter fallback — if MuAPI rejects it, the request fails outright rather than degrading to a lower resolution.
 - For any other video request — including a generic "make this look really good," with no explicit high-res ask — use the default model (`ironlabs-2.0` or whatever otherwise fits the creative need) and do **not** reach for `seedance-2-4k`. It's untested and priced substantially higher (~$1.35/s) than standard tiers, so it should never be picked speculatively.
 
-**Why "unverified" is safe to ship for the OR-backed models but risky in principle**: `canTryMuapiVideo()`'s caller falls back to OpenRouter automatically on any 4xx submit failure, so if MuAPI rejects an unrecognized `model` value, generation still succeeds via OpenRouter with the correct model — no user-visible breakage. The theoretical risk is the connector *accepting* a wrong/unrecognized `model` value and silently rendering on a different backend than requested (this exact failure mode is why the seedance-2.0-only version of this gate existed before). `happyhorse-1.1` and `seedance-2-4k` have no such safety net since neither has an OpenRouter fallback path at all.
+**Why the grok/kling block is safe in practice**: `canTryMuapiVideo()`'s caller falls back to OpenRouter automatically on any 4xx submit failure, and the backend connector's hardcoded model check (see below) throws exactly that kind of error — so every `ironlabs-2.0` / `ironlabs-2.0-fast` video request cleanly falls back to OpenRouter with the correct model, no user-visible breakage. `happyhorse-1.1` and `seedance-2-4k` remain genuinely **unverified** (not yet tested against the live connector) and have no such safety net, since neither has an OpenRouter fallback path at all — a submit failure for those is a hard error.
 
-**To confirm and remove the UNVERIFIED caveat**, whoever owns the IronLabs `/mcp/muapi` backend connector needs to confirm:
-1. Does `video_submit` accept a `model` argument today, and if so what identifier format does it expect (MuAPI's own playground slugs — `grok-imagine-text-to-video`, `kling-v3.0-pro-text-to-video`, `happyhorse-1.1`, `seedance-2-vip-text-to-video-4k` — or something IronLabs-specific)?
-2. Does the connector reject an unrecognized `model` value with a 4xx (safe — falls back automatically), or does it silently default to `seedance-2.0` regardless (unsafe — reproduces the original bug)?
-3. Is `happyhorse-1.1` proxied at all, given IronLabs has no OpenRouter route for it as a fallback?
-4. Is `seedance-2-vip-text-to-video-4k` proxied, and what resolution string does it actually expect for `4k` (`"4k"`, `"2160p"`, something else)?
+**Confirmed status (tested directly against the live `/mcp/muapi` connector, and cross-checked against irona-chat PR #828's source)**:
+1. `video_submit` does accept a `model` argument, but `backend/services/connectorMcp.registry.ts`'s `buildRequest` hardcodes `if (model !== 'bytedance/seedance-2.0') throw ...` — it rejects every other model outright, regardless of identifier format. Tested this with both the wrong guessed slug (`grok-imagine-video`) and MuAPI's real playground slug (`grok-imagine-text-to-video`) — both rejected identically, confirming this is a deliberate backend allowlist, not a slug mismatch.
+2. The connector rejects an unrecognized `model` value with a 4xx (safe — falls back automatically). Confirmed, not just assumed.
+3. `happyhorse-1.1` and `seedance-2-vip-text-to-video-4k` — still unverified; PR #828 only wired up Seedance 2.0, no evidence either way for these.
 
-Once confirmed, update `MUAPI_MODEL_ID` / `MUAPI_ONLY_VIDEO_MODEL_MAP` in `ironlabs-cli.mjs` with the verified identifiers and drop the UNVERIFIED comments.
+**To unblock grok/kling**, someone needs to extend `irona-chat`'s `muapi` connector (`backend/services/connectorMcp.registry.ts`, the `video_submit.buildRequest` model check) to support them — confirm MuAPI's actual REST endpoint paths for those models first (don't guess), the same way `seedance-v2.0-t2v`/`-i2v` were wired for Seedance. Once that backend change ships, update `MUAPI_MODEL_ID` / `MUAPI_ONLY_VIDEO_MODEL_MAP` in `ironlabs-cli.mjs` with the newly-supported identifiers and drop the "confirmed blocked" caveats above.
 
 ---
 
