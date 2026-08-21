@@ -146,7 +146,7 @@ This plain-language description works on every model and is always safe to use.
 
 ### `@Image1` / `@Image2` binding — works on the default model, no switch needed
 
-This is a real, confirmed feature on `ironlabs-2.0` (and every other OpenRouter video model) directly — attaching 2+ `ref_image` materials now genuinely reaches the model via OpenRouter's `input_references` field, with `@Image1`, `@Image2`, ... binding to upload order:
+This is a real, confirmed feature on `x-ai/grok-imagine-video` (and every other OpenRouter video model) directly — attaching 2+ `ref_image` materials now genuinely reaches the model via OpenRouter's `input_references` field, with `@Image1`, `@Image2`, ... binding to upload order:
 
 ```bash
 CLI=${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/ironlabs-cli.mjs
@@ -159,7 +159,7 @@ node "$CLI" task generate \
 
 Still keep the full `[CHARACTER]` / `[SCENE]` plain-language blocks in the prompt alongside the `@ImageN` tokens; the binding supplements the description, it doesn't replace it.
 
-An alternative path, `--model grok-multiref`, calls the same underlying model (`xai/grok-imagine-video/reference-to-video`) directly via fal.ai instead of through OpenRouter, and runs synchronously (no `task wait` needed — the result is ready as soon as `task create`/`task generate` returns). Reach for it only if you specifically want that synchronous behavior; otherwise the default model above is simpler and async like your other generations.
+The connector caps the reference count per model via `maxInputReferences` — `bytedance/seedance-2.0` accepts the most if you need more than four.
 
 ---
 

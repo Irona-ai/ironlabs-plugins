@@ -13,7 +13,7 @@ description: >
 allowed-tools: Bash, Read, Write, Glob
 metadata:
   author: ironlabs
-  version: 0.2.1
+  version: 0.3.0
   category: video-production
   tags: [video-generation, image-generation, openrouter, material-pool]
 ---
@@ -49,21 +49,29 @@ node ${CLAUDE_SKILL_DIR}/ironlabs-cli.mjs task generate \
 # Generate Image
 node ${CLAUDE_SKILL_DIR}/ironlabs-cli.mjs task generate \
   --prompt "A cute cat sitting on a crescent moon, watercolor style, dreamy atmosphere" \
-  --model nano-banana-2 --ratio 1:1
+  --model google/gemini-3.1-flash-image-preview --ratio 1:1
 ```
 
 ## Supported Models
 
-| Model alias | Resolves to (implementation detail — may change) | Type | Notes |
-|-------------|-------------------|------|-------|
-| `ironlabs-2.0` | `x-ai/grok-imagine-video` | Video | Default video |
-| `ironlabs-2.0-fast` | `kwaivgi/kling-v3.0-pro` | Video | Fast video |
-| `youmeng-2.0` / `seedance-2.0` / `sd-2.0` | `bytedance/seedance-2.0` | Video | Alt video model |
-| `nano-banana-2` | `google/gemini-3.1-flash-image-preview` | Image | Default image |
-| `nano-banana-pro` | `google/gemini-3.1-flash-image-preview` | Image | Currently maps to the same model as `nano-banana-2` |
-| `midjourney-v7` | `google/gemini-3.1-flash-image-preview` | Image | Artistic |
-| `gpt-image-2` | `google/gemini-3.1-flash-image-preview` | Image | GPT-based |
-| *(any `provider/model` path)* | — | — | Advanced: pass a raw provider/model path directly, bypassing the alias |
+Real OpenRouter model ids — there is no alias layer. A bare slug is accepted and
+expanded (`seedance-2.0` → `bytedance/seedance-2.0`); anything else is rejected
+with an error rather than silently falling back to a default.
+
+| Model | Type | Notes |
+|-------|------|-------|
+| `x-ai/grok-imagine-video` | Video | Default video |
+| `kwaivgi/kling-v3.0-pro` | Video | Fast video |
+| `bytedance/seedance-2.0` | Video | Highest ref-image capacity |
+| `alibaba/happyhorse-1.1` | Video | Alt video model |
+| `google/gemini-3.1-flash-image-preview` | Image | Default image |
+| *(any other `provider/model` path)* | — | Advanced: passed through to the connector as-is |
+
+Per-model capability rules — aspect ratios, duration bounds, resolutions,
+whether a `last_frame` is accepted, how many `ref_image` references are used —
+are enforced by the connector server-side, not by this CLI. An unsupported
+combination comes back as a clear error from the server instead of being
+silently dropped locally.
 
 ---
 
@@ -85,14 +93,25 @@ node ${CLAUDE_SKILL_DIR}/ironlabs-cli.mjs task generate \
 | `--duration` | Video duration 5–15s. Omit and the API applies its own default (5s) — always pass explicitly; the recommended segment length is 15s | `5` (API default if omitted) |
 | `--ratio` | Aspect ratio: 16:9, 9:16, 1:1, 4:3, 3:4 | `1:1` |
 | `--materials` | Comma-separated `<mat-id:role>` pairs | — |
-| `--model` | Model alias or OpenRouter path | `ironlabs-2.0` |
+| `--model` | OpenRouter model id (bare slug accepted) | `x-ai/grok-imagine-video` |
 | `--tags` | Project tags | — |
 
 ### Image Generation
 
 ```bash
 node ${CLAUDE_SKILL_DIR}/ironlabs-cli.mjs task generate \
-  --prompt "..." --model nano-banana-2 --ratio 16:9
+  --prompt "..." --model google/gemini-3.1-flash-image-preview --ratio 16:9
+```
+
+**`--seed` (images):** the connector caches on the exact request, so passing the
+same `--seed` replays the previously generated image at no extra generation cost.
+Omit it for a fresh random result. When generating a batch, pass sequential seeds
+(`0`, `1`, `2`, ...) and reuse the same seed for the same slot on a re-run.
+
+```bash
+node ${CLAUDE_SKILL_DIR}/ironlabs-cli.mjs task generate \
+  --prompt "hero product shot on white" \
+  --model google/gemini-3.1-flash-image-preview --ratio 16:9 --seed 0
 ```
 
 ---

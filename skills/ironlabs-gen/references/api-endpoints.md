@@ -140,57 +140,19 @@ Response: `{ data_base64: "<base64 video bytes>" }`.
 
 ---
 
-### MCP Connector — Fal Direct (multi-reference & video-to-video)
+### Multi-reference and video continuation
 
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/mcp/fal` | Run `fal_run` — synchronous passthrough to `https://fal.run/{model}` |
+**Multi-reference (`@Image1`/`@Image2` binding)** goes through the standard
+`video_submit` tool — pass `reference_image_urls` and bind each entry to
+`@Image1`, `@Image2`, ... in the prompt, in array order. The connector maps them
+to OpenRouter's `input_references` field and caps the list at the model's
+`maxInputReferences`, so no separate call path is needed.
 
-`fal_run` takes `{ model, input }` and forwards `input` verbatim as the POST body to `https://fal.run/{model}` — no schema translation, so it can reach capabilities OpenRouter's `video_submit` doesn't expose. Confirmed against fal.ai's own published API schemas (input **and** output):
-
-**Multi-reference (`@Image1`/`@Image2` binding)** — model `xai/grok-imagine-video/reference-to-video`:
-```json
-{
-  "params": {
-    "name": "fal_run",
-    "arguments": {
-      "model": "xai/grok-imagine-video/reference-to-video",
-      "input": {
-        "prompt": "@Image1 running through a sunlit meadow, @Image2 visible in the background",
-        "reference_image_urls": ["<url or data-uri 1>", "<url or data-uri 2>"],
-        "duration": 8,
-        "resolution": "480p",
-        "aspect_ratio": "16:9"
-      }
-    }
-  }
-}
-```
-`reference_image_urls`: 1–7 images, required. `@Image1`, `@Image2`, ... in `prompt` bind to array order — this is genuinely documented by fal.ai, not speculative. Response: `{ "video": { "url": "...", "duration", "width", "height", "fps", "content_type" } }`.
-
-**True video-to-video continuation** — model `fal-ai/veo3.1/extend-video` (or `fal-ai/veo3.1/fast/extend-video`):
-```json
-{
-  "params": {
-    "name": "fal_run",
-    "arguments": {
-      "model": "fal-ai/veo3.1/extend-video",
-      "input": {
-        "prompt": "Continue the scene naturally, same motion and style",
-        "video_url": "<url or data-uri of the prior clip>",
-        "duration": "7s",
-        "resolution": "720p",
-        "aspect_ratio": "16:9"
-      }
-    }
-  }
-}
-```
-`video_url` (required) is the actual source clip — this is the only model in this reference that accepts video input at all. Adds up to 7s per call, chainable toward ~30-148s total depending on tier. Response: `{ "video": { "url": "..." } }`.
-
-Both calls are **synchronous** — the response is the finished result, not a job id. No `video_status`/`video_download` polling step for these two.
-
-`x-ai/grok-imagine-video` (the OpenRouter default, `ironlabs-2.0`) has **no** video-input capability anywhere — not via OpenRouter, not via its own fal.ai-hosted endpoint. `ref_video` only works with the two `veo-3.1-extend*` models above; there is no way to make it work with the default model.
+**Video-to-video continuation is not available.** No model reachable through the
+connector accepts a video input — OpenRouter's video API has no video-to-video
+mode at all. `ref_video` is a hard error, not a silent no-op. For continuity
+between clips, extract a tail frame with ffmpeg and pass it as `first_frame` on
+the next generation.
 
 ---
 
@@ -226,33 +188,34 @@ Both calls are **synchronous** — the response is the finished result, not a jo
 
 ---
 
-## Model Aliases (ironlabs-cli.mjs)
+## Models (ironlabs-cli.mjs)
 
-| Alias | Model | Backend | Type |
-|-------|-------|---------|------|
-| `ironlabs-2.0` | `x-ai/grok-imagine-video` | OpenRouter (async) | Video (default) |
-| `ironlabs-2.0-fast` | `kwaivgi/kling-v3.0-pro` | OpenRouter (async) | Video fast |
-| `youmeng-2.0` / `seedance-2.0` / `sd-2.0` | `bytedance/seedance-2.0` | OpenRouter (async) | Video alt |
-| `nano-banana-2` | `google/gemini-3.1-flash-image-preview` | OpenRouter (sync) | Image (default) |
-| `nano-banana-pro` | `google/gemini-3.1-flash-image-preview` | OpenRouter (sync) | Image (currently same model as `nano-banana-2`) |
-| `midjourney-v7` | `google/gemini-3.1-flash-image-preview` | OpenRouter (sync) | Image artistic |
-| `gpt-image-2` | `google/gemini-3.1-flash-image-preview` | OpenRouter (sync) | Image GPT-based |
-| `grok-multiref` | `xai/grok-imagine-video/reference-to-video` | fal direct (sync) | Video, 1-7 `ref_image` materials, `@ImageN` binding — same capability `ironlabs-2.0` now also has via OpenRouter; use this only if you specifically want the fal-direct synchronous call |
-| `veo-3.1-extend` | `fal-ai/veo3.1/extend-video` | fal direct (sync) | Video-to-video continuation, 1 `ref_video` material — no OpenRouter equivalent exists |
-| `veo-3.1-extend-fast` | `fal-ai/veo3.1/fast/extend-video` | fal direct (sync) | Same, faster/cheaper tier |
+Real OpenRouter ids — there is no alias layer. A bare slug is accepted and
+expanded (`seedance-2.0` → `bytedance/seedance-2.0`) by a normalizer that
+mirrors irona-chat's `resolveToORModel()`; an unrecognized bare slug is a hard
+error rather than a silent fallback to the default model.
 
-Pass any `provider/model` path directly to skip aliasing (not applicable to the three fal-direct aliases, which aren't OpenRouter paths).
+| Model | Type | Notes |
+|-------|------|-------|
+| `x-ai/grok-imagine-video` | Video (async) | Default |
+| `kwaivgi/kling-v3.0-pro` | Video (async) | Fast tier |
+| `bytedance/seedance-2.0` | Video (async) | Highest `maxInputReferences` |
+| `alibaba/happyhorse-1.1` | Video (async) | Alt model |
+| `google/gemini-3.1-flash-image-preview` | Image (sync) | Default image |
 
-**Cost note**: none of the three fal-direct aliases have pricing data in `IMAGE_MODEL_MAP`/`VIDEO_MODEL_MAP`, so `credit estimate` and the printed task cost both read `0 credits` / "No pricing data" for them — that's a missing-data gap, not an indication the call is free.
+Any other full `provider/model` path is passed through to the connector as-is.
+Models outside the table above have no local pricing data, so `credit estimate`
+reads `0 credits` / "No pricing data" for them — a missing-data gap, not an
+indication the call is free.
 
 ## Material Roles
 
-| Role | Works with | Sent as | Description |
-|------|-----------|---------|--------------|
-| `first_frame` | any OpenRouter video model | `image_url` | Pin opening frame |
-| `last_frame` | OpenRouter models with `supportsLastFrame` | `last_image_url` | Pin closing frame. `x-ai/grok-imagine-video` (default) does NOT support this — the connector throws rather than silently accepting it. `kwaivgi/kling-v3.0-pro`/`bytedance/seedance-2.0` do. |
-| `ref_image` (1+) | any OpenRouter video model, `grok-multiref`, or image models | `image_url` (first one) + `reference_image_urls` (all of them) | Style/identity reference. Bind each to `@Image1`, `@Image2`, ... in the prompt, in upload order — confirmed real on OpenRouter now (maps to its documented `input_references` field), capped per-model server-side. |
-| `ref_video` | **`veo-3.1-extend` / `veo-3.1-extend-fast` only** | `video_url` | True motion/style carryover from a completed clip. No OpenRouter model — including Veo 3.1, which IS otherwise available through OpenRouter — exposes this; OpenRouter's video API has no video-to-video mode at all, confirmed from OpenRouter's own docs. Passing `ref_video` to any OpenRouter model here is a hard error, not a silent no-op. |
+| Role | Sent as | Description |
+|------|---------|--------------|
+| `first_frame` | `image_url` | Pin opening frame |
+| `last_frame` | `last_image_url` | Pin closing frame. Model-gated: the connector checks `supportsLastFrame` and throws a clear error for models that don't support it (including `x-ai/grok-imagine-video`, the default) rather than forwarding an invalid combination. |
+| `ref_image` (1+) | `image_url` (first one) + `reference_image_urls` (all of them) | Style/identity reference. Bind each to `@Image1`, `@Image2`, ... in the prompt, in upload order. Maps to OpenRouter's `input_references` field and is capped per-model server-side via `maxInputReferences`. |
+| `ref_video` | — | **Not supported on any model.** OpenRouter's video API has no video-to-video mode. Passing `ref_video` is a hard error, not a silent no-op — extract a tail frame with ffmpeg and pass it as `first_frame` instead. |
 
 Materials are stored locally in `~/.ironlabs/materials/` as base64 by `ironlabs-cli.mjs`.
 
@@ -260,15 +223,19 @@ Materials are stored locally in `~/.ironlabs/materials/` as base64 by `ironlabs-
 
 `16:9`, `9:16`, `1:1`, `4:3`, `3:4`
 
-## Image Size Mapping (OpenRouter `image_generate`)
+## Image Size (OpenRouter `image_generate`)
 
-| CLI ratio | `size` |
-|-----------|--------|
-| `1:1` | `1024x1024` |
-| `16:9` | `1536x1024` |
-| `9:16` | `1024x1536` |
-| `4:3` | `1344x1024` |
-| `3:4` | `1024x1344` |
+`--ratio` is forwarded verbatim as the tool's `size` argument, which accepts
+either an aspect-ratio hint (`"16:9"`) or explicit pixels (`"1536x1024"`). The
+CLI no longer pre-converts ratios to pixel dimensions — the connector owns that
+interpretation.
+
+## Image Seeds (`image_generate`)
+
+`--seed` is forwarded as the tool's `seed` argument. The connector keys its
+generation cache on the exact request body, so reusing a seed replays the
+previously generated image instead of re-generating it. Omitting `--seed`
+means every repeat request misses the cache and produces a new result.
 
 ## Resolution Mapping (OpenRouter `video_submit`)
 

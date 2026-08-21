@@ -78,9 +78,9 @@ Do NOT describe product appearance in the prompt — it comes from the reference
 **Balance check** before generating:
 ```bash
 node ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/ironlabs-cli.mjs credit me
-node ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/ironlabs-cli.mjs credit estimate --model ironlabs-2.0 --duration 15
+node ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/ironlabs-cli.mjs credit estimate --model x-ai/grok-imagine-video --duration 15
 ```
-`credit estimate` needs no API key and returns the real cost for a given model/duration (e.g. `ironlabs-2.0` at 10s is ~40 credits). Inform user if budget is tight vs. plan.
+`credit estimate` needs no API key and returns the real cost for a given model/duration (e.g. `x-ai/grok-imagine-video` at 10s is ~40 credits). Inform user if budget is tight vs. plan.
 
 ---
 
@@ -123,7 +123,7 @@ node ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/ironlabs-cli.mjs material upload 
 4. **Generate** with product image anchored:
 ```bash
 node ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/ironlabs-cli.mjs task generate \
-  --prompt "<ecom prompt>" --model ironlabs-2.0 --duration 15 --ratio 9:16 \
+  --prompt "<ecom prompt>" --model x-ai/grok-imagine-video --duration 15 --ratio 9:16 \
   --materials "194:ref_image" --tags "ecom"
 ```
 
@@ -144,7 +144,7 @@ User brief → Script → Visual Dev → Write all prompts → Confirm → Gener
 2. **Visual Dev**: See `Read ${CLAUDE_SKILL_DIR}/references/visual-dev.md` for full details.
    - If user provided materials: ingest with `material-ingest.mjs`, match against needs
    - **Consistency Analysis**: Before generating anything, identify what needs to stay consistent across segments:
-     - **Characters** recurring in 2+ segments → generate a character sheet image with nano-banana-2, upload as material, use as `ref_image` or `first_frame`
+     - **Characters** recurring in 2+ segments → generate a character sheet image with google/gemini-3.1-flash-image-preview, upload as material, use as `ref_image` or `first_frame`
      - **Locations** recurring in 2+ segments → generate scene concept image (environment only, no faces) + upload as material
      - **Props/vehicles/objects** that are plot-critical → include in scene concept or describe in detail
    - Not every segment needs every anchor. A segment with a new character in a new location may only need a scene ref. A continuation of the previous shot needs the previous segment's extracted tail frame as `first_frame`. Judge per segment.
@@ -199,9 +199,9 @@ S4    Maya + new location (café)                       "201:ref_image,204:ref_i
 
 **Generate a character sheet and upload it:**
 ```bash
-# 1. Generate character sheet with nano-banana-2 (--resolution has no effect on image models; size comes from --ratio)
+# 1. Generate character sheet with google/gemini-3.1-flash-image-preview (--resolution has no effect on image models; size comes from --ratio)
 node ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/ironlabs-cli.mjs task generate \
-  --model nano-banana-2 --ratio 16:9 \
+  --model google/gemini-3.1-flash-image-preview --ratio 16:9 \
   --prompt "<character sheet prompt: full body, neutral pose, white background, front-facing>"
 
 # 2. Download and upload as material

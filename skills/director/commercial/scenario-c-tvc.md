@@ -108,7 +108,7 @@ Present all shots together so the user sees the complete video in one view:
 @Image 1 → [filename] → ref_image (all shots)
 
 --- Generation Parameters ---
-Model: ironlabs-2.0 | Ratio: W:H | Est. cost: run `credit estimate --model ironlabs-2.0 --duration <seconds>` per segment and sum
+Model: x-ai/grok-imagine-video | Ratio: W:H | Est. cost: run `credit estimate --model x-ai/grok-imagine-video --duration <seconds>` per segment and sum
 Note: Each shot is a separate segment, assembled by ffmpeg.
 ---
 ```

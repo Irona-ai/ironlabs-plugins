@@ -14,14 +14,21 @@ Quick reference for creating and registering visual assets before writing prompt
 
 ## Picking an Image Model
 
-| Use case | Model | Why |
-|----------|-------|-----|
-| Character design sheet, scene refs, drafts, hero keyframes | `nano-banana-2` | Default image model |
-| Hero / final keyframe where fidelity matters | `nano-banana-pro` | Same underlying model as `nano-banana-2` today — alias kept for when it diverges |
-| Poster / title card / anything with readable text or logos | `gpt-image-2` | Alias intended for stronger typography — currently the same underlying model too |
-| Stylized / painterly illustration | `midjourney-v7`, or `nano-banana-2` with style keywords | Alias intended for stronger stylization — currently the same underlying model; "painterly", "illustration style" in-prompt works either way |
+There is one image model: `google/gemini-3.1-flash-image-preview`. It covers
+every use case below — character design sheets, scene refs, drafts, hero
+keyframes, posters and title cards, and stylized illustration.
 
-All four aliases currently map to the same underlying model (`google/gemini-3.1-flash-image-preview`) per `ironlabs-gen/references/api-endpoints.md` — pick by intent now so prompts don't need rewriting if the aliases diverge later. Pass `--model` to `ironlabs-cli.mjs task generate`.
+| Use case | How to steer it |
+|----------|-----------------|
+| Character design sheet, scene refs, drafts | Default prompt, no special handling |
+| Hero / final keyframe where fidelity matters | Describe lighting and lens explicitly; add `--seed` so you can reproduce the exact frame later |
+| Poster / title card with readable text or logos | Quote the exact text in the prompt and state its placement |
+| Stylized / painterly illustration | Style keywords in-prompt — "painterly", "illustration style", named medium |
+
+The earlier `nano-banana-pro` / `gpt-image-2` / `midjourney-v7` aliases all
+resolved to this same model and have been removed — steer by prompt, not by
+model name. Pass `--model google/gemini-3.1-flash-image-preview` to
+`ironlabs-cli.mjs task generate`.
 
 ---
 
@@ -47,7 +54,7 @@ No text labels. No background elements.
 **Generate:**
 ```bash
 node ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/ironlabs-cli.mjs task generate \
-  --model nano-banana-2 --ratio 16:9 \
+  --model google/gemini-3.1-flash-image-preview --ratio 16:9 \
   --prompt "<character sheet prompt>" \
   --tags "<project>,char-<name>"
 # → saved locally, copy to assets/char-<name>.jpg
@@ -78,7 +85,7 @@ Scene images must NOT contain human faces.
 **Generate one scene ref per segment:**
 ```bash
 node ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/ironlabs-cli.mjs task generate \
-  --model nano-banana-2 --ratio 16:9 \
+  --model google/gemini-3.1-flash-image-preview --ratio 16:9 \
   --prompt "<scene description, environment only, no people. Include: location, time of day, lighting, color palette, key props, atmosphere. Photorealistic, cinematic composition.>" \
   --tags "<project>,scene-s<N>"
 # → copy output to assets/scene-s<N>.jpg
