@@ -6,7 +6,7 @@
 
 ## How the Reference Video Is Used
 
-Run Gemini analysis on the reference video to extract all style elements as **text** — do NOT upload the reference video for generation as `ref_video`. The `ref_video` role (which only works with `--model veo-3.1-extend`/`-fast`, see `INDEX.md`) is for chaining your own generated segments, not external style reference. Passing the original video in as a material risks copying the original person or product into the output.
+Run Gemini analysis on the reference video to extract all style elements as **text**. Do not try to upload the reference video as a generation material — no model accepts a video input, so `ref_video` is a hard error (see `INDEX.md`). Even setting that aside, feeding the original video in risks copying the original person or product into the output; text extraction is the correct path for external style reference.
 
 Extract the following from the reference video via Gemini:
 

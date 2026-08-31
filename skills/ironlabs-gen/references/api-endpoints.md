@@ -7,9 +7,17 @@ Base URL: https://www.chat.ironlabs.ai/api/v1   (or IRONLABS_BASE_URL if set)
 Auth:     Authorization: Bearer <IRONLABS_API_KEY>
 ```
 
-All generation goes through the **MCP connector system**. Two steps:
-1. Issue a sandbox token (short-lived JWT)
-2. Call the MCP endpoint with that token
+All generation goes through the **IronLabs "generate" MCP toolset** in one step:
+POST the MCP JSON-RPC call to `/mcp/ext/generate` with `IRONLABS_API_KEY` as the
+bearer token. There is no token-issuance step — the older `/ext/token` sandbox
+token is deliberately unused, because its scope allowlist has no `image`/`video`
+entry, so a token for these connectors cannot be minted at all.
+
+Both generate tools are **synchronous**: the call blocks for the whole render and
+returns the finished asset. There is no submit/poll/download cycle. Each result
+reports which cache/provider tier served it (`source`) and what it cost
+(`cost_usd`); the server-side chain is
+**exact cache → semantic cache → MuAPI → OpenRouter fallback**.
 
 ---
 
@@ -23,49 +31,23 @@ All generation goes through the **MCP connector system**. Two steps:
 
 Response:
 ```json
-{ "balance": 150 }
+{ "data": { "totalBalance": 1.50 } }
 ```
-Balance is in cents — divide by 100 for dollars (`$1.50`).
+`totalBalance` is in **dollars**; `ironlabs-cli.mjs` normalizes it to cents
+internally. A response without a usable `totalBalance` is treated as an error,
+not as a zero balance.
 
 ---
 
-### Sandbox Token
+### Generate Connector — Image (`image_generate`)
 
 | Method | Path | Description |
 |--------|------|-------------|
-| POST | `/ext/token` | Issue a short-lived sandbox token |
+| POST | `/mcp/ext/generate` | Run `image_generate` — synchronous |
 
-**Request:**
-```json
-{
-  "scope": ["openrouter"],
-  "ttlSeconds": 3600
-}
-```
-
-**Response:**
-```json
-{
-  "success": true,
-  "data": {
-    "token": "<jwt>",
-    "expiresAt": 1234567890,
-    "scope": ["openrouter"]
-  }
-}
-```
-
-Scope value: `"openrouter"` — used for both generation (image/video) and Gemini analysis.
-
----
-
-### MCP Connector — Image Generation (OpenRouter)
-
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/mcp/openrouter` | Run `image_generate` via MCP connector |
-
-Auth: `Authorization: Bearer <sandbox_token>` (NOT the API key — use token from `/ext/token`)
+Auth: `Authorization: Bearer <IRONLABS_API_KEY>`.
+Send `Accept: application/json, text/event-stream` — the endpoint may answer
+either way, and the CLI parses the single `data:` line out of an SSE response.
 
 **Request — MCP JSON-RPC:**
 ```json
@@ -77,128 +59,34 @@ Auth: `Authorization: Bearer <sandbox_token>` (NOT the API key — use token fro
     "name": "image_generate",
     "arguments": {
       "prompt": "A cute cat sitting on a crescent moon, watercolor style",
+      "user_prompt": "draw me a cat on the moon",
       "model": "google/gemini-3.1-flash-image-preview",
-      "size": "1024x1024",
+      "aspect_ratio": "1:1",
+      "quantity": 1,
       "image_url": "data:image/jpeg;base64,<b64>"
     }
   }
 }
 ```
-`image_url` is optional — include it for image-to-image (reference/first-frame material).
+Every argument except `prompt` is optional. `model` is sent only when the caller
+picked one — omitting it lets the connector apply its own default **and** run its
+cross-model cache peek, which it skips whenever a model is supplied.
+`user_prompt` is the user's own wording and is what the cache keys on.
+`image_url` turns the call into image-to-image (a `ref_image` or `first_frame`
+material).
 
-**Response:** a chat-completion object; the image is in `choices[0].message.content[]` as a `{ type: "image_url", image_url: { url } }` part.
+**Response** (inside the MCP text content, as JSON):
+```json
+{ "images": ["<url>"], "source": "<cache tier or provider>", "model": "...", "cost_usd": 0.06 }
+```
 
 ---
 
-### MCP Connector — Video Generation (OpenRouter)
+### Generate Connector — Video (`video_generate`)
 
 | Method | Path | Description |
 |--------|------|-------------|
-| POST | `/mcp/openrouter` | Run `video_submit` via MCP connector (async) |
-| POST | `/mcp/openrouter` | Run `video_status` to poll a submitted generation |
-| POST | `/mcp/openrouter` | Run `video_download` to fetch the finished video bytes |
-
-**Request — submit:**
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 1,
-  "method": "tools/call",
-  "params": {
-    "name": "video_submit",
-    "arguments": {
-      "prompt": "@Image1 dancing on the moon, cinematic. @Image2 visible in the background.",
-      "model": "x-ai/grok-imagine-video",
-      "image_url": "data:image/jpeg;base64,<b64>",
-      "last_image_url": "data:image/jpeg;base64,<b64>",
-      "reference_image_urls": ["data:image/jpeg;base64,<b64_1>", "data:image/jpeg;base64,<b64_2>"],
-      "duration": 5,
-      "aspect_ratio": "16:9",
-      "resolution": "720p"
-    }
-  }
-}
-```
-`image_url` (first frame) is optional — omit it for pure text-to-video. Include it for image-to-video (first-frame/ref_image material).
-`last_image_url` is optional, but **model-gated**: irona-chat's `video_submit` now checks `supportsLastFrame` per model before forwarding it — `x-ai/grok-imagine-video` (the default) doesn't support it and the connector throws a clear error rather than silently sending an invalid combination to OpenRouter. `kwaivgi/kling-v3.0-pro` and `bytedance/seedance-2.0` do support it.
-`reference_image_urls` — **confirmed working, not speculative.** Maps to OpenRouter's real `input_references` field (documented at [openrouter.ai/docs/api/api-reference/video-generation/create-videos](https://openrouter.ai/docs/api/api-reference/video-generation/create-videos)), capped per-model server-side via `maxInputReferences`. `ironlabs-cli.mjs` sends every attached `ref_image` material here, in upload order — bind to each with `@Image1`, `@Image2`, ... in the prompt.
-Response: `{ id, polling_url, status }`.
-
-**Still no `video_url` field.** `video_submit` has no way to accept an existing video as input — that capability doesn't exist on OpenRouter's video API at all (checked OpenRouter's own docs directly: text-to-video, image-to-video, and reference-to-video are the only three modes it documents, for any model, including Veo 3.1 which is otherwise available through OpenRouter). See the Fal Direct section below for how real video-to-video continuation works instead.
-
-**Request — poll status:**
-```json
-{ "params": { "name": "video_status", "arguments": { "id": "<generation-id>" } } }
-```
-Poll every ~10s until `status` is `"completed"` (result in `unsigned_urls[0]`) or `"failed"`.
-
-**Request — download (video URLs need gateway auth):**
-```json
-{ "params": { "name": "video_download", "arguments": { "url": "<video-url>" } } }
-```
-Response: `{ data_base64: "<base64 video bytes>" }`.
-
----
-
-### MCP Connector — Fal Direct (multi-reference & video-to-video)
-
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/mcp/fal` | Run `fal_run` — synchronous passthrough to `https://fal.run/{model}` |
-
-`fal_run` takes `{ model, input }` and forwards `input` verbatim as the POST body to `https://fal.run/{model}` — no schema translation, so it can reach capabilities OpenRouter's `video_submit` doesn't expose. Confirmed against fal.ai's own published API schemas (input **and** output):
-
-**Multi-reference (`@Image1`/`@Image2` binding)** — model `xai/grok-imagine-video/reference-to-video`:
-```json
-{
-  "params": {
-    "name": "fal_run",
-    "arguments": {
-      "model": "xai/grok-imagine-video/reference-to-video",
-      "input": {
-        "prompt": "@Image1 running through a sunlit meadow, @Image2 visible in the background",
-        "reference_image_urls": ["<url or data-uri 1>", "<url or data-uri 2>"],
-        "duration": 8,
-        "resolution": "480p",
-        "aspect_ratio": "16:9"
-      }
-    }
-  }
-}
-```
-`reference_image_urls`: 1–7 images, required. `@Image1`, `@Image2`, ... in `prompt` bind to array order — this is genuinely documented by fal.ai, not speculative. Response: `{ "video": { "url": "...", "duration", "width", "height", "fps", "content_type" } }`.
-
-**True video-to-video continuation** — model `fal-ai/veo3.1/extend-video` (or `fal-ai/veo3.1/fast/extend-video`):
-```json
-{
-  "params": {
-    "name": "fal_run",
-    "arguments": {
-      "model": "fal-ai/veo3.1/extend-video",
-      "input": {
-        "prompt": "Continue the scene naturally, same motion and style",
-        "video_url": "<url or data-uri of the prior clip>",
-        "duration": "7s",
-        "resolution": "720p",
-        "aspect_ratio": "16:9"
-      }
-    }
-  }
-}
-```
-`video_url` (required) is the actual source clip — this is the only model in this reference that accepts video input at all. Adds up to 7s per call, chainable toward ~30-148s total depending on tier. Response: `{ "video": { "url": "..." } }`.
-
-Both calls are **synchronous** — the response is the finished result, not a job id. No `video_status`/`video_download` polling step for these two.
-
-`x-ai/grok-imagine-video` (the OpenRouter default, `ironlabs-2.0`) has **no** video-input capability anywhere — not via OpenRouter, not via its own fal.ai-hosted endpoint. `ref_video` only works with the two `veo-3.1-extend*` models above; there is no way to make it work with the default model.
-
----
-
-### MCP Connector — Gemini Analysis (OpenRouter)
-
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/mcp/openrouter` | Run OpenRouter model via MCP connector |
+| POST | `/mcp/ext/generate` | Run `video_generate` — synchronous, blocks for the whole render |
 
 **Request:**
 ```json
@@ -207,52 +95,131 @@ Both calls are **synchronous** — the response is the finished result, not a jo
   "id": 1,
   "method": "tools/call",
   "params": {
-    "name": "openrouter_chat_completion",
+    "name": "video_generate",
     "arguments": {
-      "model": "google/gemini-2.5-flash",
-      "messages": [{
-        "role": "user",
-        "content": [
-          { "type": "image_url", "image_url": { "url": "data:image/jpeg;base64,<b64>" } },
-          { "type": "text", "text": "Analyze this product photo." }
-        ]
-      }],
-      "max_tokens": 8192,
-      "temperature": 1.0
+      "prompt": "A cat dancing on the moon, cinematic.",
+      "user_prompt": "make my cat dance on the moon",
+      "model": "bytedance/seedance-2.0",
+      "image_url": "data:image/jpeg;base64,<b64>",
+      "duration": 15,
+      "aspect_ratio": "16:9",
+      "resolution": "1080p",
+      "audio": true
     }
   }
 }
 ```
+`image_url` (used as the first frame) is optional — omit it for pure
+text-to-video.
+
+**One still, and only one.** `video_generate` has no `last_image_url` and no
+`reference_image_urls` field. `ironlabs-cli.mjs` sends the `first_frame`
+material, or the first `ref_image` when no first frame was given, and prints a
+warning for any extra `ref_image` or a `last_frame` rather than silently dropping
+it. `@Image2`/`@Image3` prompt tokens have nothing to bind to.
+
+**No video input on any model.** There is no `video_url` field — OpenRouter's
+video API documents only text-to-video, image-to-video and reference-to-video for
+every model it carries. `ref_video` is a hard error from the CLI, not a silent
+no-op.
+
+**Response:**
+```json
+{ "url": "<video-url>", "source": "...", "model": "...", "cost_usd": 0.53 }
+```
+The URL is returned ready to use — there is no separate download/auth step.
 
 ---
 
-## Model Aliases (ironlabs-cli.mjs)
+### Call Semantics (both tools)
 
-| Alias | Model | Backend | Type |
-|-------|-------|---------|------|
-| `ironlabs-2.0` | `x-ai/grok-imagine-video` | OpenRouter (async) | Video (default) |
-| `ironlabs-2.0-fast` | `kwaivgi/kling-v3.0-pro` | OpenRouter (async) | Video fast |
-| `youmeng-2.0` / `seedance-2.0` / `sd-2.0` | `bytedance/seedance-2.0` | OpenRouter (async) | Video alt |
-| `nano-banana-2` | `google/gemini-3.1-flash-image-preview` | OpenRouter (sync) | Image (default) |
-| `nano-banana-pro` | `google/gemini-3.1-flash-image-preview` | OpenRouter (sync) | Image (currently same model as `nano-banana-2`) |
-| `midjourney-v7` | `google/gemini-3.1-flash-image-preview` | OpenRouter (sync) | Image artistic |
-| `gpt-image-2` | `google/gemini-3.1-flash-image-preview` | OpenRouter (sync) | Image GPT-based |
-| `grok-multiref` | `xai/grok-imagine-video/reference-to-video` | fal direct (sync) | Video, 1-7 `ref_image` materials, `@ImageN` binding — same capability `ironlabs-2.0` now also has via OpenRouter; use this only if you specifically want the fal-direct synchronous call |
-| `veo-3.1-extend` | `fal-ai/veo3.1/extend-video` | fal direct (sync) | Video-to-video continuation, 1 `ref_video` material — no OpenRouter equivalent exists |
-| `veo-3.1-extend-fast` | `fal-ai/veo3.1/fast/extend-video` | fal direct (sync) | Same, faster/cheaper tier |
+- **Timeout:** the CLI caps a single generate call at 900s (`MCP_CALL_TIMEOUT_MS`).
+  A render that outruns the server's request budget shows up as a torn stream or
+  a 200 with no event; both are reported as a 504-style timeout. The job may
+  still have run and been billed upstream.
+- **Tool-level errors come back as HTTP 200** with `result.isError: true` and the
+  reason in the text content — including insufficient balance, which is *not* an
+  HTTP 402 on this endpoint. Check `isError` before parsing the payload.
 
-Pass any `provider/model` path directly to skip aliasing (not applicable to the three fal-direct aliases, which aren't OpenRouter paths).
+---
 
-**Cost note**: none of the three fal-direct aliases have pricing data in `IMAGE_MODEL_MAP`/`VIDEO_MODEL_MAP`, so `credit estimate` and the printed task cost both read `0 credits` / "No pricing data" for them — that's a missing-data gap, not an indication the call is free.
+### Multi-reference and video continuation
+
+**Multi-reference is not available on video.** `video_generate` accepts a single
+still, so there is no `@Image1`/`@Image2` binding to set up. Compose the
+references into one image first (via `image_generate`) and pass that as the
+first frame.
+
+**Video-to-video continuation is not available.** No model reachable through the
+connector accepts a video input. For continuity between clips, extract a tail
+frame with ffmpeg and pass it as `first_frame` on the next generation.
+
+---
+
+### Visual Analysis (not a generation connector)
+
+Image/video analysis does **not** go through `/mcp/ext/generate`. It runs natively
+on Irona's LLM gateway — `skills/visual-analysis/scripts/analyze.mjs` creates a
+throwaway conversation via `POST /chat/conversation`, then streams
+`POST /chat/completions` (SSE) with `IRONLABS_API_KEY`:
+
+```json
+{
+  "models": ["google/gemini-3.5-flash"],
+  "messages": [{
+    "role": "user",
+    "content": [
+      { "type": "image_url", "image_url": { "url": "<uploaded-url>" } },
+      { "type": "text", "text": "Analyze this product photo." }
+    ]
+  }],
+  "stream": true,
+  "conversationId": "<id>"
+}
+```
+
+`/chat/completions` rejects unrecognized body keys — `temperature`, `max_tokens`
+and `response_format` each return a 400 `Unrecognized key(s)`. JSON output is
+requested in the prompt instead.
+
+---
+
+## Models (ironlabs-cli.mjs)
+
+Real OpenRouter ids — there is no alias layer. A bare slug is accepted and
+expanded (`seedance-2.0` → `bytedance/seedance-2.0`) by a normalizer that
+mirrors irona-chat's `resolveToORModel()`; an unrecognized bare slug is a hard
+error rather than a silent fallback to the default model.
+
+Both tools are synchronous, so every model below returns its finished asset from
+the one call.
+
+| Model | Type | Notes |
+|-------|------|-------|
+| `bytedance/seedance-2.0` | Video | **Default video** |
+| `x-ai/grok-imagine-video` | Video | Alt video model |
+| `kwaivgi/kling-v3.0-pro` | Video | Fast tier |
+| `alibaba/happyhorse-1.1` | Video | Not on MuAPI — always billed via OpenRouter |
+| `google/gemini-3.1-flash-image-preview` | Image | **Default image** (Nano Banana 2) |
+| `google/gemini-3.1-flash-lite-image` | Image | Cheapest image |
+| `google/gemini-3-pro-image-preview` | Image | Highest quality |
+| `google/gemini-2.5-flash-image` | Image | Nano Banana 1 |
+| `x-ai/grok-imagine-image-quality` | Image | Alt image model |
+| `bytedance-seed/seedream-4.5` | Image | Alt image model |
+
+Any other full `provider/model` path is passed through to the connector as-is.
+Models outside the table above have no local pricing data, so `credit estimate`
+reads `0 credits` / "No pricing data" for them — a missing-data gap, not an
+indication the call is free.
 
 ## Material Roles
 
-| Role | Works with | Sent as | Description |
-|------|-----------|---------|--------------|
-| `first_frame` | any OpenRouter video model | `image_url` | Pin opening frame |
-| `last_frame` | OpenRouter models with `supportsLastFrame` | `last_image_url` | Pin closing frame. `x-ai/grok-imagine-video` (default) does NOT support this — the connector throws rather than silently accepting it. `kwaivgi/kling-v3.0-pro`/`bytedance/seedance-2.0` do. |
-| `ref_image` (1+) | any OpenRouter video model, `grok-multiref`, or image models | `image_url` (first one) + `reference_image_urls` (all of them) | Style/identity reference. Bind each to `@Image1`, `@Image2`, ... in the prompt, in upload order — confirmed real on OpenRouter now (maps to its documented `input_references` field), capped per-model server-side. |
-| `ref_video` | **`veo-3.1-extend` / `veo-3.1-extend-fast` only** | `video_url` | True motion/style carryover from a completed clip. No OpenRouter model — including Veo 3.1, which IS otherwise available through OpenRouter — exposes this; OpenRouter's video API has no video-to-video mode at all, confirmed from OpenRouter's own docs. Passing `ref_video` to any OpenRouter model here is a hard error, not a silent no-op. |
+| Role | Sent as | Description |
+|------|---------|--------------|
+| `first_frame` | `image_url` | Pin opening frame (video); reference image (image-to-image) |
+| `ref_image` | `image_url` — the first one only | Style/identity reference. Extra `ref_image` materials are **not** sent: the tools have no `reference_image_urls` field, so the CLI warns and uses only the first. |
+| `last_frame` | — | **Not supported.** `video_generate` has no `last_image_url` field; the CLI warns and ignores the material. |
+| `ref_video` | — | **Not supported on any model.** OpenRouter's video API has no video-to-video mode. Passing `ref_video` is a hard error, not a silent no-op — extract a tail frame with ffmpeg and pass it as `first_frame` instead. |
 
 Materials are stored locally in `~/.ironlabs/materials/` as base64 by `ironlabs-cli.mjs`.
 
@@ -260,31 +227,42 @@ Materials are stored locally in `~/.ironlabs/materials/` as base64 by `ironlabs-
 
 `16:9`, `9:16`, `1:1`, `4:3`, `3:4`
 
-## Image Size Mapping (OpenRouter `image_generate`)
+## Image Size (`image_generate`)
 
-| CLI ratio | `size` |
-|-----------|--------|
-| `1:1` | `1024x1024` |
-| `16:9` | `1536x1024` |
-| `9:16` | `1024x1536` |
-| `4:3` | `1344x1024` |
-| `3:4` | `1024x1344` |
+`--ratio` is forwarded as the tool's `aspect_ratio` argument. There is no `size`
+or pixel-dimension argument — the CLI does not convert ratios to pixels, and the
+connector owns the resolution it renders at. `--resolution` does not apply to
+images; passing it prints a note and is ignored.
 
-## Resolution Mapping (OpenRouter `video_submit`)
+## Reproducibility / Cache Reuse (`image_generate`, `video_generate`)
+
+There is no seed argument — the CLI has no `--seed` flag and the connector takes
+none. Repeat generations are deduplicated by the connector's cache instead, which
+keys on the request and on the user's own wording rather than on an expanded
+prompt. Pass `--user-prompt` with the user's original phrasing so a repeat ask
+hits that cache (and shares hits with the chat app); without it, a repeat request
+misses the cache and produces a new result at full cost.
+
+## Resolution Mapping (`video_generate`)
 
 | CLI `--resolution` | `resolution` |
 |---------------------|--------------|
 | `1k` | `720p` |
 | `2k` | `1080p` |
-| `4k` | `1080p` |
+| `4k` | `1080p` (video models top out at 1080p; the CLI prints a note) |
 
 ## Error Codes
 
 | Code | Meaning | Fix |
 |------|---------|-----|
 | 401 | Invalid API key | Check `IRONLABS_API_KEY`, run `/ironlabs:setup` |
-| 402 | Insufficient balance | Run `/ironlabs:add-credits` |
+| 402 | Insufficient balance (HTTP-level, e.g. on `/chat/balance`) | Run `/ironlabs:add-credits` |
 | 400 | Bad request | Check prompt format / connector config |
-| 500 | OpenRouter error | Retry; check the OpenRouter connector is connected in IronLabs Settings |
+| 500 | Upstream provider error | Retry; check the generation connector is connected in IronLabs Settings |
+| 504 | Render outran the request budget, or no result before the 900s cap | Retry, or use a shorter `--duration`. The job may still have been billed upstream |
+
+On `/mcp/ext/generate`, most failures — insufficient balance included — arrive as
+an HTTP **200** with `result.isError: true` and the reason in the text content,
+per the MCP protocol. Do not treat a 200 as success without checking that flag.
 
 ---

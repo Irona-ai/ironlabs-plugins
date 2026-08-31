@@ -6,7 +6,7 @@ Model reference only. For prompt writing guidance, see `Read ${CLAUDE_SKILL_DIR}
 
 | Parameter | Value |
 |-----------|-------|
-| Default model | `x-ai/grok-imagine-video` (alias `ironlabs-2.0`) |
+| Default model | `x-ai/grok-imagine-video` |
 | Min duration | 5 seconds |
 | Max duration | 15 seconds |
 | Duration options | Any integer 5–15s |
@@ -58,8 +58,8 @@ Override with the `--model` flag.
 
 ### Multi-Reference-to-Video (works on the default model)
 - Material role: `ref_image`, 2 or more
-- Bind each to `@Image1`, `@Image2`, ... in `--prompt`, in upload order — confirmed working directly on `ironlabs-2.0` via OpenRouter's `input_references` field, no model switch needed
-- `--model grok-multiref` is an alternative path to the same capability (calls the same underlying model directly via fal, runs synchronously — do not `task wait` for it); reach for it only if you specifically want that synchronous behavior
+- Bind each to `@Image1`, `@Image2`, ... in `--prompt`, in upload order — confirmed working directly on `x-ai/grok-imagine-video` via OpenRouter's `input_references` field, no model switch needed
+- The connector caps the reference count per model (`maxInputReferences`) — `bytedance/seedance-2.0` takes the most
 - Same privacy-detection caveat applies to any reference image with a real face
 
 ### Best Practices
@@ -140,21 +140,9 @@ More anchors = stronger consistency, but longer generation time (8–12 min with
 
 ## Multi-Segment Continuity
 
-For sequential segments on the default model (`ironlabs-2.0` / any OpenRouter model), use tail-frame → next `first_frame` when the next segment must open on an exact carried-over pose/composition/state, or when you need a clean visual handoff of gaze, props, or lighting. This is the only continuity method that works on these models — none of them accept a previous-segment video as input, confirmed by reading the actual connector code (not just undocumented).
+For sequential segments on the default model (`x-ai/grok-imagine-video` / any OpenRouter model), use tail-frame → next `first_frame` when the next segment must open on an exact carried-over pose/composition/state, or when you need a clean visual handoff of gaze, props, or lighting. This is the only continuity method that works on these models — none of them accept a previous-segment video as input, confirmed by reading the actual connector code (not just undocumented).
 
-**A second, genuinely different continuity method exists, but on a different model.** `--model veo-3.1-extend` (or `veo-3.1-extend-fast`) calls Google's Veo 3.1 directly via fal.ai and actually continues an existing clip's motion — not a still frame, the real video:
-
-```bash
-CLI=${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/ironlabs-cli.mjs
-
-# S1 already generated and saved as a task
-CLIP1_MAT=$(node "$CLI" task chain <S1-task-id> | jq -r '.material.id')
-node "$CLI" task generate --model veo-3.1-extend \
-  --prompt "Continue the scene naturally, same motion and style" \
-  --materials "${CLIP1_MAT}:ref_video"
-```
-
-Trade-offs vs. tail-frame → `first_frame`: this switches you off `ironlabs-2.0` onto a different model/provider entirely (Veo 3.1, not grok-imagine-video), adds up to 7s per call (chainable toward ~30-148s depending on tier), and the call is synchronous (blocks until done, no `task wait`). Use it when actual motion carryover matters more than staying on the default model; otherwise tail-frame → `first_frame` remains the simpler default for segment handoffs.
+There is no second method: video-to-video continuation is not available on any model reachable through the connector, because OpenRouter's video API has no video-to-video mode. `ref_video` is a hard error rather than a silent no-op, so tail-frame → `first_frame` is the continuity method for segment handoffs.
 
 ```bash
 CLI=${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/ironlabs-cli.mjs

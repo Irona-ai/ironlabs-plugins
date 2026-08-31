@@ -20,7 +20,7 @@ If the user did NOT provide a presenter image, or you're generating a portrait i
 
 ```bash
 node ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/ironlabs-cli.mjs task generate \
-  --model nano-banana-2 --ratio 1:1 \
+  --model google/gemini-3.1-flash-image-preview --ratio 1:1 \
   --prompt "<portrait prompt>"
 curl -s -o presenter.png "<generated_image_url>"
 node ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/ironlabs-cli.mjs material upload presenter.png

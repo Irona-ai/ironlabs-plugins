@@ -54,15 +54,15 @@ reference the camera movement of @Video 1    ← explicitly only partial feature
 
 | Reference type | Prompt syntax | `--materials` role | Notes |
 |---------------|--------------|---------------------------|-------|
-| Product / scene image(s) (no faces), incl. multi-reference | `@Image N` | `ID:ref_image` (1+) | Works directly on `ironlabs-2.0`/any OpenRouter model — binds `@Image1`, `@Image2`, ... to each image in upload order, confirmed via OpenRouter's own documented `input_references` field. `--model grok-multiref` is an equivalent alternative path (same underlying model, called directly via fal, synchronous) — no need to switch models unless you specifically want that. |
+| Product / scene image(s) (no faces), incl. multi-reference | `@Image N` | `ID:ref_image` (1+) | Works on every video model — binds `@Image1`, `@Image2`, ... to each image in upload order via OpenRouter's `input_references` field. The connector caps the count per model (`maxInputReferences`); `bytedance/seedance-2.0` accepts the most. |
 | Scene image with incidental faces (face NOT the reference target) | `@Image N` | `ID:ref_image` | Treat as scene ref |
 | Person image where face IS the character identity | `@Image N` | `ID:ref_image`, or `asset:ID:ref_image` if reused often | See Face Privacy Rule below — real faces may still be blocked regardless of upload path |
-| Reference video (chaining own segments only) | `@Video N` | `ID:ref_video` with `--model veo-3.1-extend` (or `-fast`) | Confirmed real motion carryover — but ONLY with these two models. `ref_video` is a hard error on `ironlabs-2.0`/any OpenRouter model — they have no video-input field at all. Still NOT for external style; use Gemini analysis instead for that |
+| Reference video | — | **not supported** | No model accepts a video input — OpenRouter has no video-to-video mode. `ref_video` is a hard error. Chain your own segments with tail-frame → `first_frame` instead; for external style, use Gemini analysis. |
 | First frame | `@Image N` | `ID:first_frame` | Combines freely with `ref_image` in the same `--materials` flag |
 
 **Face Privacy Rule**: Human faces passed as `ref_image` may trigger privacy detection in some OpenRouter video/image models. Unlike a hard, guaranteed block, this is model-dependent — but treat it as likely. Registering an image as an asset (`asset create`) does **not** bypass this check; asset registration is purely a reuse convenience, not a privacy workaround. When a real face photo is blocked, or as the default for any presenter/character face:
 
-- Generate an AI portrait of the character (`nano-banana-2` or similar) and use that as the reference instead of the real photo, **or**
+- Generate an AI portrait of the character (`google/gemini-3.1-flash-image-preview` or similar) and use that as the reference instead of the real photo, **or**
 - Describe the person in text only, with no uploaded face material.
 
 Do this automatically without waiting for a block — real face photos are the exception, not the default path.
@@ -83,17 +83,17 @@ Do this automatically without waiting for a block — real face photos are the e
 4. **Confirm generation parameters**:
    - Duration: 5–15s per segment (the CLI accepts any integer in this range; over 15s → multi-segment chaining)
    - Aspect ratio: `16:9`, `9:16`, `1:1`, `4:3`, or `3:4`, based on the user's request
-   - Model — pass via `--model`, default is `ironlabs-2.0`:
+   - Model — pass via `--model`, default is `x-ai/grok-imagine-video`:
 
-| Alias | Underlying model | Notes |
-|-------|-------------------|-------|
-| `ironlabs-2.0` (default) | `x-ai/grok-imagine-video` | Default video model, via OpenRouter |
-| `ironlabs-2.0-fast` | `kwaivgi/kling-v3.0-pro` | Alt video model, via OpenRouter |
-| `seedance-2.0` (`youmeng-2.0` / `sd-2.0`) | `bytedance/seedance-2.0` | Alt video model, via OpenRouter |
-| `grok-multiref` | `xai/grok-imagine-video/reference-to-video` | Direct via fal, synchronous — alternative path to the same 2+ `ref_image` / `@ImageN` capability `ironlabs-2.0` now also has via OpenRouter |
-| `veo-3.1-extend` (`-fast`) | `fal-ai/veo3.1/extend-video` | Direct via fal — only model that supports `ref_video` motion carryover; no OpenRouter equivalent exists |
+| Model | Notes |
+|-------|-------|
+| `x-ai/grok-imagine-video` | Default video model |
+| `kwaivgi/kling-v3.0-pro` | Alt video model, supports `last_frame` |
+| `bytedance/seedance-2.0` | Alt video model, highest `maxInputReferences` |
+| `alibaba/happyhorse-1.1` | Alt video model |
+| `google/gemini-3.1-flash-image-preview` | Image model |
 
-Full model/material/resolution details live in `Read ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/references/video-capabilities.md` and `Read ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/references/api-endpoints.md` — read those before picking a non-default model. Multi-reference/`@ImageN` binding now works on the default `ironlabs-2.0` (and every other OpenRouter model here) directly. `ref_video` remains the exception — it only works with `veo-3.1-extend`/`-fast`, since OpenRouter has no video-to-video mode at all for any model.
+Full model/material/resolution details live in `Read ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/references/video-capabilities.md` and `Read ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/references/api-endpoints.md` — read those before picking a non-default model. All generation goes through the image/video connector, which enforces each model's capability limits server-side. Multi-reference/`@ImageN` binding works on every video model. `ref_video` works on none of them — OpenRouter has no video-to-video mode.
 
 > **Scenario D only**: After Phase 1, execute Phase 1.5 (asset pre-upload) before writing any prompt. See `scenario-d-ugc.md`.
 
@@ -132,7 +132,7 @@ Present the full prompt in the standard preview format and wait for explicit con
 @Video 1 → [filename / description] → Gemini analysis only (NOT uploaded for generation)
 
 --- Generation Parameters ---
-Model: ironlabs-2.0
+Model: x-ai/grok-imagine-video
 Duration: N seconds
 Aspect ratio: W:H
 Estimated cost: run `ironlabs credit estimate --model <model> --duration <seconds>` (no API key required)
@@ -175,7 +175,7 @@ Record all `material_id` / `asset_id` values and their roles.
 ```bash
 node ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/ironlabs-cli.mjs task generate \
   --prompt "<prompt>" \
-  --model ironlabs-2.0 \
+  --model x-ai/grok-imagine-video \
   --duration <seconds> \
   --ratio <ratio> \
   --materials "<id1>:<role1>,<id2>:<role2>"
@@ -185,7 +185,7 @@ node ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/ironlabs-cli.mjs task generate \
 
 **Step 5 — Multi-segment continuity** (only when total video exceeds 15s)
 
-Tail-frame → `first_frame` is the default continuity method — works on every model here, including `ironlabs-2.0`. A second method, `task chain`'s `ref_video` output, is now confirmed to work too, but only with `--model veo-3.1-extend` (or `-fast`) — see `video-capabilities.md` for the trade-offs and when to reach for it instead:
+Tail-frame → `first_frame` is the continuity method — it works on every model here. There is no video-to-video alternative: no model accepts a clip as input.
 
 ```bash
 ffmpeg -sseof -0.2 -i generated/shots/S1.mp4 -frames:v 1 -q:v 2 -y generated/keyframes/S1-end.jpg
@@ -215,7 +215,7 @@ node "$CLI" asset create <path>
 
 # Generate video (blocks until done)
 node "$CLI" task generate \
-  --prompt "prompt" --model ironlabs-2.0 \
+  --prompt "prompt" --model x-ai/grok-imagine-video \
   --duration 10 --ratio 9:16 \
   --materials "id1:ref_image,asset:id2:ref_image"
 
@@ -223,7 +223,7 @@ node "$CLI" task generate \
 node "$CLI" credit me
 ```
 
-**On the default model (`ironlabs-2.0` and other OpenRouter models), `first_frame`, `last_frame`, and `ref_image` (any number) combine freely** in one `--materials` flag, e.g. `"CHAR_ID:ref_image,S1_END_ID:first_frame,SCENE_ID:ref_image"` (see the Serial Continuity examples in `SKILL.md`) — every `ref_image` reaches the model now, bind each with `@Image1`, `@Image2`, ... in the prompt. `ref_video` is the one role NOT part of that mix — it only works standalone with `--model veo-3.1-extend`/`-fast`.
+**`first_frame`, `last_frame`, and `ref_image` (any number) combine freely** in one `--materials` flag, e.g. `"CHAR_ID:ref_image,S1_END_ID:first_frame,SCENE_ID:ref_image"` (see the Serial Continuity examples in `SKILL.md`) — bind each `ref_image` with `@Image1`, `@Image2`, ... in the prompt. Two caveats, both enforced by the connector: `last_frame` is rejected on models that don't support it (including the default `x-ai/grok-imagine-video`), and `ref_image` is capped at each model's `maxInputReferences`.
 
 **Timeout note**: Video generation takes ~3–10 minutes per segment and runs **asynchronously server-side** — `task create` returns immediately with status `"pending"`, and `task result <id>` does NOT wait (it returns without a `videoUrl` for a still-pending task). If `task generate` times out client-side, use `task create` followed by `task wait <id> --timeout 900` to block until the video finishes, then `task result <id>` to fetch it. Image tasks complete synchronously and don't need this. Estimate cost with `credit estimate --model <model> --duration <seconds>` (no API key needed) and check remaining balance with `credit me`.
 
@@ -245,8 +245,8 @@ node "$CLI" credit me
 ## Important Notes
 
 1. **Language**: Draft in user's language. Translate to English before the API call — except Scenario D (dialogue prompts stay in user's language for lip-sync)
-2. **Asset limits**: no documented hard cap on `ref_image` count — any number combine freely on the default model (`ironlabs-2.0` and other OpenRouter models), each bound via `@Image1`, `@Image2`, ... — see Asset Reference Rules above
+2. **Asset limits**: no documented hard cap on `ref_image` count — any number combine freely on the default model (`x-ai/grok-imagine-video` and other OpenRouter models), each bound via `@Image1`, `@Image2`, ... — see Asset Reference Rules above
 3. **Duration**: 5–15s per segment; use tail-frame → `first_frame` chaining for longer videos
 4. **Face privacy**: default to AI-generated portraits or text-only descriptions for any character/presenter face — don't rely on asset registration as a workaround
 5. **Aspect ratio**: Once confirmed, all reference images should match the same ratio
-6. **Cost**: run `credit estimate --model <model> --duration <seconds>` before generating (no API key needed, e.g. `ironlabs-2.0` at 10s is ~40 credits); check `credit me` for remaining balance and notify the user proactively if it's low
+6. **Cost**: run `credit estimate --model <model> --duration <seconds>` before generating (no API key needed, e.g. `x-ai/grok-imagine-video` at 10s is ~40 credits); check `credit me` for remaining balance and notify the user proactively if it's low
