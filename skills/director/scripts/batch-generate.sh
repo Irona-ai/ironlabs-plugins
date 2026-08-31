@@ -8,11 +8,15 @@
 #
 # Prompts JSON format:
 #   [
-#     { "shot_id": "S1", "prompt": "...", "duration": 8 },
-#     { "shot_id": "S2", "prompt": "...", "duration": 10, "materials": "1234567890:ref_image" },
+#     { "shot_id": "S1", "prompt": "...", "duration": 15 },
+#     { "shot_id": "S2", "prompt": "...", "duration": 15, "materials": "1234567890:first_frame" },
 #     ...
 #   ]
-# The "materials" field is optional. Format: "<material-id:role,...>" (material IDs from ironlabs-cli.mjs material upload).
+# "duration" is optional and defaults to 15s. "materials" is optional; format is
+# "<material-id:role,...>" with IDs from `ironlabs-cli.mjs material upload`.
+#
+# Generation is synchronous: each shot blocks for its full render (minutes for
+# video) before the next one starts, so a long batch takes the sum of its shots.
 #
 # Environment:
 #   IRONLABS_API_KEY      Required
@@ -21,20 +25,20 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CLI="node ${SCRIPT_DIR}/../../ironlabs-gen/ironlabs-cli.mjs"
+# An array, not a string: the plugin path can contain spaces, and an unquoted
+# "$CLI" would word-split it into broken arguments.
+CLI=(node "${SCRIPT_DIR}/../../ironlabs-gen/ironlabs-cli.mjs")
 
 # ---- Parse args ----
 PROJECT=""
 RATIO="16:9"
 PROMPTS_FILE=""
-TIMEOUT=600
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --project)      PROJECT="$2";      shift 2 ;;
     --ratio)        RATIO="$2";        shift 2 ;;
     --prompts-file) PROMPTS_FILE="$2"; shift 2 ;;
-    --timeout)      TIMEOUT="$2";      shift 2 ;;
     *)              echo "Unknown arg: $1"; exit 1 ;;
   esac
 done
@@ -67,11 +71,13 @@ RESULTS=()
 FAILED=0
 
 for i in $(seq 0 $((SHOT_COUNT - 1))); do
-  SHOT_ID=$(jq -r  ".[$i].shot_id"              "$PROMPTS_FILE")
-  PROMPT=$(jq -r   ".[$i].prompt"               "$PROMPTS_FILE")
-  DURATION=$(jq    ".[$i].duration"             "$PROMPTS_FILE")
-  MATERIALS=$(jq -r ".[$i].materials // empty"  "$PROMPTS_FILE")
-  MODEL=$(jq -r    ".[$i].model // empty"       "$PROMPTS_FILE")
+  SHOT_ID=$(jq -r  ".[$i].shot_id"                  "$PROMPTS_FILE")
+  PROMPT=$(jq -r   ".[$i].prompt"                   "$PROMPTS_FILE")
+  # Default to the recommended 15s segment. Without this, a shot with no
+  # "duration" yielded the literal string "null" and sent `--duration null`.
+  DURATION=$(jq -r  ".[$i].duration // 15"          "$PROMPTS_FILE")
+  MATERIALS=$(jq -r ".[$i].materials // empty"      "$PROMPTS_FILE")
+  MODEL=$(jq -r    ".[$i].model // empty"           "$PROMPTS_FILE")
 
   echo "--- [$((i + 1))/$SHOT_COUNT] $SHOT_ID (${DURATION}s) ---"
 
@@ -84,16 +90,24 @@ for i in $(seq 0 $((SHOT_COUNT - 1))); do
     CLI_ARGS+=(--model "$MODEL")
   fi
 
-  # Create task. Images complete synchronously; videos return status "pending"
-  # and need an explicit wait below.
-  TASK_JSON=$($CLI "${CLI_ARGS[@]}" 2>/dev/null) || {
-    echo "[FAILED] $SHOT_ID — CLI error"
+  # Both image and video generation are synchronous — this call blocks for the
+  # whole render (minutes for video) and returns the finished asset. There is no
+  # pending state left to poll.
+  #
+  # stderr is captured rather than discarded: the CLI reports the actual reason a
+  # generation failed there (bad model, insufficient balance, unsupported
+  # duration), and throwing it away left every failure reading "cli error".
+  CLI_STDERR=$(mktemp)
+  TASK_JSON=$("${CLI[@]}" "${CLI_ARGS[@]}" 2>"$CLI_STDERR") || {
+    echo "[FAILED] $SHOT_ID — $(tail -n 3 "$CLI_STDERR" | tr '\n' ' ')"
+    rm -f "$CLI_STDERR"
     FAILED=$((FAILED + 1))
     RESULTS+=("$SHOT_ID|FAILED|—|cli error")
     echo ""
     echo "Stopping batch — fix the issue and re-run."
     break
   }
+  rm -f "$CLI_STDERR"
 
   TASK_ID=$(echo "$TASK_JSON" | jq -r '.task.id // empty' 2>/dev/null)
   if [[ -z "$TASK_ID" ]]; then
@@ -105,23 +119,13 @@ for i in $(seq 0 $((SHOT_COUNT - 1))); do
     break
   fi
 
-  TASK_STATUS=$(echo "$TASK_JSON" | jq -r '.task.status // empty' 2>/dev/null)
-  if [[ "$TASK_STATUS" == "completed" ]]; then
-    RESULT_JSON=$($CLI task result "$TASK_ID" 2>/dev/null) || {
-      echo "[FAILED] $SHOT_ID — Could not get result"
-      FAILED=$((FAILED + 1))
-      RESULTS+=("$SHOT_ID|FAILED|$TASK_ID|no result")
-      continue
-    }
-  else
-    # Video task: still pending — poll until it finishes.
-    RESULT_JSON=$($CLI task wait "$TASK_ID" --timeout "$TIMEOUT" 2>/dev/null) || {
-      echo "[FAILED] $SHOT_ID — Timed out or failed while waiting"
-      FAILED=$((FAILED + 1))
-      RESULTS+=("$SHOT_ID|FAILED|$TASK_ID|wait failed")
-      continue
-    }
-  fi
+  # `task create` already returned the finished asset, so the record is on disk.
+  RESULT_JSON=$("${CLI[@]}" task result "$TASK_ID" 2>/dev/null) || {
+    echo "[FAILED] $SHOT_ID — Could not read back result"
+    FAILED=$((FAILED + 1))
+    RESULTS+=("$SHOT_ID|FAILED|$TASK_ID|no result")
+    continue
+  }
 
   VIDEO_URL=$(echo "$RESULT_JSON" | jq -r '.videoUrl // .imageUrl // "—"' 2>/dev/null || echo "—")
 
@@ -138,13 +142,16 @@ echo "========================================="
 printf "%-8s %-10s %-14s %s\n" "Shot" "Status" "Task ID" "URL"
 printf "%-8s %-10s %-14s %s\n" "----" "------" "-------" "---"
 
-for entry in "${RESULTS[@]}"; do
+# ${RESULTS[@]+...} guards the empty-array case: under `set -u`, bash 3.2 — still
+# the default /bin/bash on macOS — treats "${RESULTS[@]}" on an empty array as an
+# unbound variable and aborts before printing the summary.
+for entry in ${RESULTS[@]+"${RESULTS[@]}"}; do
   IFS='|' read -r shot status task_id url <<< "$entry"
   printf "%-8s %-10s %-14s %s\n" "$shot" "$status" "$task_id" "$url"
 done
 
 echo ""
-echo "Total: ${#RESULTS[@]}/$SHOT_COUNT completed, $FAILED failed"
+echo "Total: $((${#RESULTS[@]} - FAILED))/$SHOT_COUNT succeeded, $FAILED failed"
 
 if [[ $FAILED -gt 0 ]]; then
   exit 1

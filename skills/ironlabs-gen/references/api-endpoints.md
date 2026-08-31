@@ -77,8 +77,11 @@ material).
 
 **Response** (inside the MCP text content, as JSON):
 ```json
-{ "images": ["<url>"], "source": "<cache tier or provider>", "model": "...", "cost_usd": 0.06 }
+{ "images": ["<url>", "..."], "source": "<cache tier or provider>", "model": "...", "cost_usd": 0.06 }
 ```
+`images` holds one URL per requested `quantity`, and **each one is billed**. The CLI
+stores the whole array as `imageUrls` on the task record (with `imageUrl` kept as the
+first, for compatibility) — `task result` prints every URL.
 
 ---
 
@@ -165,7 +168,7 @@ throwaway conversation via `POST /chat/conversation`, then streams
 
 ```json
 {
-  "models": ["google/gemini-3.5-flash"],
+  "models": ["google-ai-studio/gemini-3.5-flash"],
   "messages": [{
     "role": "user",
     "content": [
@@ -221,7 +224,16 @@ indication the call is free.
 | `last_frame` | — | **Not supported.** `video_generate` has no `last_image_url` field; the CLI warns and ignores the material. |
 | `ref_video` | — | **Not supported on any model.** OpenRouter's video API has no video-to-video mode. Passing `ref_video` is a hard error, not a silent no-op — extract a tail frame with ffmpeg and pass it as `first_frame` instead. |
 
-Materials are stored locally in `~/.ironlabs/materials/` as base64 by `ironlabs-cli.mjs`.
+`reference_image` is accepted as an alias for `ref_image` (it is the default role for
+`--characters` and for a role-less `asset:<id>`). Any role the CLI does not recognize
+is reported as a warning at parse time rather than silently dropped.
+
+Materials are stored locally in `~/.ironlabs/materials/` as base64 by `ironlabs-cli.mjs`
+and sent to the connector as inline `data:` URIs. **There is no upload/hosting
+endpoint** — `POST /api/v1/upload` returns 404, and the only route under `/uploads`
+is `pdf-proxy`. The connector stages inline references into R2 itself before handing
+them to MuAPI, so inline is the supported path; the cost is that a material is
+re-sent in full on every generate call that references it. Downscale large stills.
 
 ## Aspect Ratios
 

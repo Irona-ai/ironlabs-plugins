@@ -56,8 +56,14 @@ Generate as **one single API call**. Write all visual stages into one prompt + a
 ```bash
 node ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/ironlabs-cli.mjs task generate \
   --prompt "<full 3-shot prompt above>" --duration 15 --ratio 16:9 \
-  --materials "<person_material_id>:ref_image,<boot_material_id>:ref_image" --tags "tvc,brand-film"
+  --materials "<opening_still_id>:first_frame" --tags "tvc,brand-film"
 ```
+
+> **One still only.** The example prompt above references `@Image 1` and `@Image 2`, but
+> the connector accepts a single reference image — those tokens do not bind to anything.
+> Describe both the person and the product in plain language in the prompt, and if you
+> need them anchored visually, compose a single opening frame with `image_generate`
+> first and pass that as `first_frame`.
 
 ---
 
@@ -105,10 +111,10 @@ Present all shots together so the user sees the complete video in one view:
 [Full prompt for shot N]
 
 --- Asset Mapping ---
-@Image 1 → [filename] → ref_image (all shots)
+Reference still → [filename] → first_frame (one per segment; video takes a single still)
 
 --- Generation Parameters ---
-Model: x-ai/grok-imagine-video | Ratio: W:H | Est. cost: run `credit estimate --model x-ai/grok-imagine-video --duration <seconds>` per segment and sum
+Model: default (bytedance/seedance-2.0) | Ratio: W:H | Est. cost: run `credit estimate --duration <seconds>` per segment and sum — indicative only, video estimates measure well below the billed figure
 Note: Each shot is a separate segment, assembled by ffmpeg.
 ---
 ```

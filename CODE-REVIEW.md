@@ -1,149 +1,164 @@
-# Code Review — ironlabs-plugin
+# Code Review — image/video generation path
 
-> Review of branch `add-claude-review` vs `main`. Every finding was verified against the
-> code (tsc, `node --check`, grep). **All findings below have since been fixed in this
-> branch** — status is marked ✅ on each item; see "Fixes applied" at the bottom.
+> Audit of the image/video generation path against the live `irona-chat` backend.
+> Every finding was verified against the connector's actual source or by probing the
+> deployed API — not inferred from comments. All findings below have been fixed in
+> the working tree; see "Fixes applied".
 
-## Overview
+## Scope
 
-This is the `ironlabs` Claude Code / OpenClaw plugin: a statusLine balance widget
-(`src/`), a generation CLI (`skills/ironlabs-gen/ironlabs-cli.mjs`), skill docs,
-hooks, and helper scripts.
+`skills/ironlabs-gen/` (the generation CLI and its references), `skills/director/`
+(creative direction + batch script), `skills/visual-analysis/`, and the hooks that
+gate them.
 
-The previous version of this file described a set of bugs (text-to-video, command
-injection, unsorted lists, FAL/OpenRouter contradictions, etc.) that were **already
-fixed** in commit `ffe6c76` (`claude-code-fixes`). That fix pass, however, **botched
-two edits** in the balance dollars→cents refactor and shipped the two headline
-features — the statusLine and `credit me` — broken. Those two regressions are the
-main story of this branch and are listed first.
+## Verified correct (for the record)
 
----
+Checked against `irona-chat`, so the next reader does not have to re-derive it:
 
-## 🔴 Show-stoppers (introduced by the balance refactor)
-
-### 1. ✅ `src/credits-cache.ts` does not compile — stray closing brace
-`src/credits-cache.ts:80` has an extra `}` (the `refreshFromApi` body closes at `:79`).
-Verified:
-- `npx tsc --noEmit` → `src/credits-cache.ts(80,1): error TS1128: Declaration or statement expected.`
-- brace balance for the file is `-1`.
-
-The statusLine is invoked directly as `… src/index.ts` via tsx/node
-(`commands/setup.md:93-98`), and `index.ts` imports `credits-cache.js`. The module
-fails to parse, so `index.ts` never loads and `main().catch()` never runs — **the
-balance widget renders nothing on every refresh.** The mangled indentation from
-`:67` down is the tell that this was a bad hand-edit.
-
-**Fix:** delete the extra `}` at `:80`.
-
-### 2. ✅ `ironlabs-cli.mjs` `getMe()` references an undefined variable `raw`
-`skills/ironlabs-gen/ironlabs-cli.mjs:195-209`:
-```js
-const data = await this.request("GET", "/chat/balance");
-if (raw == null) {              // ← `raw` is never declared
-```
-The assignment `const raw = data.data?.totalBalance ?? data.balance` was dropped.
-`raw` is read at `:197` and `:201` but grep confirms it is never assigned. The file
-passes `node --check` (it's a valid reference syntactically) but throws
-`ReferenceError: raw is not defined` at runtime. It is not an `ApiError`, so it
-escapes to `throw e` at `:1112` → uncaught stack trace. **`credit me` is completely
-broken**, and any code path that calls `getMe()` fails.
-
-**Fix:** add `const raw = data.data?.totalBalance ?? data.balance;` before `:197`.
-
-> Both bugs are the *same* refactor (normalize balance to cents) applied twice and
-> fumbled both times.
+- Endpoint `POST /api/v1/mcp/ext/generate` exists and is auth-gated (probed: `401`;
+  `/chat/balance` → `405`, so the base URL and routing are right).
+- A raw `IRONLABS_API_KEY` bearer is accepted — `backend/utils/externalMcpAuth.ts:40`
+  falls through to `authenticateApiToken` for any non-OAuth-prefixed key. The
+  `/ext/token` sandbox token genuinely cannot be minted for these scopes.
+- Tool names match `backend/constants/externalMcpToolsets.constants.ts:21-22`.
+- Arguments match `AgentImageArgs` / `AgentVideoArgs` exactly — `prompt`,
+  `user_prompt`, `model`, `image_url`, `aspect_ratio`, `quantity` / `duration`,
+  `resolution`, `audio`. No field is invented and none is missing.
+- Defaults match the server: `bytedance/seedance-2.0`,
+  `google/gemini-3.1-flash-image-preview`, duration `10`, resolution `720p`.
+- `isError: true`-on-HTTP-200 handling, SSE `data:` parsing, and the 900s client cap
+  against the route's `maxDuration: 800` are all correct — the server gives up first,
+  and that path is handled as a timeout rather than a raw stack trace.
+- Video result URLs are public and re-fetchable (`/api/v1/video/generated?key=`
+  presign-redirects with no auth), so `task chain` works as documented.
 
 ---
 
-## 🟠 Stale references left by the migration
+## 🔴 Bugs that cost money or silently lost work
 
-### 3. ✅ `match-materials.mjs` output is incompatible with the current CLI
-The workflow migrated from `video-gen.sh --materials "path:role"` to uploaded material
-**IDs** (`task generate --materials "194:ref_image"`). But
-`skills/ironlabs-gen/scripts/match-materials.mjs:97-124` still emits **localPath**-based
-flags (`assets/char.jpg:ref_image`), and its header comment (`:17`) references the
-now-deleted `video-gen.sh`. Fed to the CLI, `buildCreateParams` does
-`parseInt("assets/char.jpg")` → `NaN` → `readMaterial(NaN)` → null → **the material is
-silently dropped**. This script is referenced live from `SKILL.md` and `visual-dev.md`,
-so it produces flags that don't work.
+### 1. ✅ `--quantity` discarded every image after the first
+`image_generate` renders and **bills** N images. The CLI sent `quantity`, then kept
+`orResult.images[0]` and dropped the rest — so `--quantity 4` paid for four images
+and returned one, with no warning. `SKILL.md` advertised it as "a batch in one call".
 
-### 4. ✅ `ref_video` residue in `api-endpoints.md`
-The branch correctly purged `ref_video` everywhere (it is no longer a supported role)
-**except** `skills/ironlabs-gen/references/api-endpoints.md`, which still mentions it.
+**Fix:** store the full array as `imageUrls` (keeping `imageUrl` as the first for
+compatibility), print every URL, and warn when fewer come back than were requested.
+`credit estimate` now multiplies by quantity too — it had been quoting the
+single-image price for a 4-image call, understating by 4x.
 
-### 5. ✅ Version numbers still not reconciled
-Manifests are `0.2.1` (`marketplace.json:8`, `plugin.json:4`, `openclaw.plugin.json:5`),
-but `package.json:3` is `0.1.0` and all four `SKILL.md` are `0.1.0` (director was
-*downgraded* 0.3.0→0.1.0 in this branch). No single source of truth.
+### 2. ✅ `--characters` was dead code — every character reference was dropped
+`buildCreateParams` defaulted the role to `reference_image`, but `createTask` only
+matches `ref_image` / `first_frame`. Nothing matched, so the material was discarded
+without a word and the generation ran unanchored at full price. The same hole applied
+to `--materials "asset:<id>"` with no explicit role. The CLI's own help, and
+`director/SKILL.md`'s anchoring table, both told users to use exactly these forms.
 
----
+**Fix:** a `normalizeRole()` alias table (`reference_image`/`reference`/`ref`/`image`
+→ `ref_image`, `start_frame`/`first` → `first_frame`) applied to all three material
+paths, plus a parse-time warning for any role that still isn't recognized — so a typo
+can never again fail silently. Verified end-to-end against a stub connector: a
+`--characters` ref now arrives as `image_url`.
 
-## 🟢 Dead code / repo hygiene
+### 3. ✅ The upload endpoint does not exist
+`uploadMaterial()` POSTed to `{baseUrl}/upload`, which returns **404** on production
+(there is no `pages/api/v1/upload*` and no rewrite; the only route under `/uploads`
+is `pdf-proxy`). The "try the CDN, fall back to inline" branch therefore never once
+succeeded — it cost every upload a doomed round-trip and printed a failure note.
+`visual-analysis/scripts/analyze.mjs` hit the same dead route for >20MB files.
 
-- **✅ Committed build artifact:** `__pycache__/analyze-beats.cpython-314.pyc` was tracked
-  and not ignored. Untracked (`git rm --cached`), deleted, and `__pycache__/` + `*.pyc`
-  added to `.gitignore`.
-- **`index.mjs`** — `export default function register() {}` is a no-op stub, wired via
-  `package.json` `openclaw.extensions` (`:5-7`). Does nothing. **Left in place** — it's the
-  OpenClaw extension entry point the manifest expects; removing it needs an OpenClaw-side
-  decision, not a code cleanup.
-- **`CODE-REVIEW.md` (this file's prior content)** — was a point-in-time artifact that
-  had gone stale: it still told readers to "delete `upload.mjs`" (already deleted in this
-  branch) and listed text-to-video, command-injection, unsorted-lists, and the
-  FAL/OpenRouter contradiction as open — all fixed. A committed review that misdescribes
-  the code is worse than none; keep it regenerated or drop it from the repo.
+**Fix:** both now go straight to the inline `data:` URI path, which is the real,
+working mechanism (the connector stages inline references into R2 itself). The CLI
+warns above 8MB that the material is re-sent on every referencing call;
+`analyze.mjs` reports the 20MB limit up front with the ffmpeg commands to get under
+it, instead of failing after a wasted request.
 
----
+### 4. ✅ `batch-generate.sh` carried a dead async branch
+It claimed videos return `pending` and polled with `task wait --timeout` — a flag the
+CLI does not have, on a code path that is unreachable now that both tools are
+synchronous. It also read `.duration` with no default, sending `--duration null` for
+any shot that omitted it, and `2>/dev/null` on every call meant every failure read
+"cli error" with the real reason discarded.
 
-## ⚪ Lower severity / nits
+**Fix:** dead branch removed; `duration` defaults to 15; stderr is captured and the
+actual message is printed on failure (verified: an unknown model now reports the
+model list instead of "cli error"); `$CLI` is an array so a plugin path with spaces
+survives; the summary loop is guarded for the empty-array case under `set -u`, which
+aborts on macOS's bash 3.2.
 
-- **✅ `gemini.mjs` doc mismatch:** the header and `--help` advertised `(default: 1.0)` /
-  `(default: 8192)` for `--temperature`/`--max-tokens` as if they worked; both now read
-  "Not supported by the gateway — ignored" to match the runtime warning.
-- **`src/index.ts` `runPreviousStatusLine` (`:43-59`)** runs an arbitrary shell command
-  from `~/.ironlabs/previous-statusline.json` on every refresh. It is the user's own saved
-  config, the code documents it, and setup now `chmod 600`s the file — risk is low, but it
-  remains an unguarded `execSync` on every status tick.
+### 5. ✅ `director/SKILL.md` documented an impossible recovery path
+It told the model that generation "runs asynchronously server-side" and to fall back
+to `task create` + `task wait <id> --timeout 900`. `task create` blocks identically,
+and on failure no task record is written — so `task wait` reports "not found".
 
----
-
-## Verified fixed since the last review (for the record)
-
-- Text-to-video no longer hard-errors — `image_url` is omitted for pure t2v
-  (`ironlabs-cli.mjs:290-299`).
-- `material-ingest.mjs` uses `execFileSync` with an argv array — command-injection surface
-  closed (`:98-102`).
-- Local task/material lists sort by id before slicing (`:72`, `:99`).
-- `nextId()` folds `process.pid` + a sequence so same-millisecond creates don't collide
-  (`:44-48`).
-- `credit estimate` surfaces "no pricing data" for unknown aliases instead of silently
-  repricing against the default (`:211-231`).
-- FAL→OpenRouter story is now consistent across the SKILL docs and `setup.md`.
+**Fix:** rewritten to state that generation is synchronous, to give the Bash call a
+long explicit timeout, and to re-run the generate command on failure (checking
+`credit me` first, since the upstream job may already have been billed).
 
 ---
 
-## Fixes applied (this pass)
+## 🟠 Documentation that misdirected generation
 
-1. **`credits-cache.ts`** — removed the stray `}` and re-indented the block.
-   `npx tsc --noEmit` now passes; the statusLine builds again.
-2. **`ironlabs-cli.mjs` `getMe()`** — added `const raw = data.data?.totalBalance ?? data.balance`.
-   `credit me` no longer throws `ReferenceError`; `credit estimate` smoke-tested OK.
-3. **`match-materials.mjs`** — stderr summary now prints the `material upload` command per
-   matched file and a `--materials "${VAR}:role"` template instead of bare paths; header
-   comment updated (no more `video-gen.sh`). Smoke-tested against a fixture.
-4. **`.pyc`** — untracked + deleted; `__pycache__/` and `*.pyc` added to `.gitignore`.
-5. **Versions** — `package.json` and all four `SKILL.md` bumped `0.1.0` → `0.2.1` to match
-   the manifests (now a single version everywhere).
-6. **`api-endpoints.md`** — removed the last `ref_video` role row.
-7. **`gemini.mjs`** — docs/`--help` for `--temperature`/`--max-tokens` now say "not
-   supported — ignored".
+`references/video-capabilities.md` is read *before every prompt session*
+(`director/SKILL.md` hard rule), so its errors propagated into real generations:
 
-Verification: `npx tsc --noEmit` clean; `node --check` passes on all `.mjs`; no `ref_video`
-references remain outside this file; all manifests + skills report `0.2.1`.
+- ✅ Default model read `x-ai/grok-imagine-video`. It is `bytedance/seedance-2.0` in
+  both the CLI and the backend.
+- ✅ A "Multi-Reference-to-Video (works on the default model)" section claimed
+  `@Image1`/`@Image2` binding was "confirmed working" via `input_references`.
+  `video_generate` takes exactly one `image_url`; there is no such field on any model.
+  Rewritten as **NOT AVAILABLE**, with the compose-into-one-image workaround.
+- ✅ Claimed an omitted duration defaults to "effectively 5s". It is 10s.
+- ✅ Added the 720p default and a note that naming `--model` disables the connector's
+  cross-model cache peek.
+
+Also fixed:
+- ✅ `director/SKILL.md` called `credit estimate` "the real cost" and quoted ~40
+  credits, while the CLI returns "measured several times low" on that same call.
+- ✅ Director examples pinned `--model`, defeating the cache peek that
+  `ironlabs-gen/SKILL.md` tells you to preserve.
+- ✅ "OpenRouter connector error" → the image/video generation connector.
+- ✅ `api-endpoints.md` listed the analysis model as `google/gemini-3.5-flash`;
+  `analyze.mjs` uses `google-ai-studio/gemini-3.5-flash`.
+- ✅ `SKILL.md`'s "with multiple references" example passed two `ref_image`
+  materials, which the CLI drops down to one.
+
+---
+
+## ⚪ Lower severity
+
+- ✅ **`isImageModel` misrouted text models.** Any full path containing `gemini` was
+  treated as an image model, so `google/gemini-3.5-flash` would have been billed as
+  an image render. The heuristic now requires an image-shaped name
+  (`flux`/`ideogram`/`gpt-image`/`imagen`/`seedream`/`image`).
+- ✅ **`match-materials.mjs`** emitted every match comma-joined into one
+  `--materials` flag; the connector uses one still, so the extras were warned about
+  and dropped. It now emits the top match and lists runners-up as alternatives. Its
+  `has_face` sentinel was renamed `asset` → `face-blocked` (`asset` is a real,
+  different concept in this CLI) and now explains why the material is held back.
+- ✅ **`hooks/check-api-key.sh`** only checked the environment variable, so a key
+  configured via `.env` — which the scripts do read — was blocked on calls that would
+  have worked. It also did not guard `analyze.mjs` / `material-ingest.mjs`, which
+  authenticate the same way. Both fixed.
+- ✅ **Version drift.** Manifests were `0.2.1`, `ironlabs-gen` `0.3.0`,
+  `visual-analysis` `0.2.2`. All eight now read `0.3.0`.
 
 ### Not changed (intentionally)
 
-- **`index.mjs` no-op stub** — it is the OpenClaw extension entry the manifest points at;
-  removal is an OpenClaw-integration decision, not a code cleanup.
-- **`runPreviousStatusLine` `execSync`** — low risk (user's own config, `chmod 600`); left
-  as-is and documented.
+- **`index.mjs` no-op stub** — the OpenClaw extension entry the manifest points at;
+  removal is an integration decision, not a cleanup.
+- **`runPreviousStatusLine` `execSync`** — low risk (the user's own `chmod 600`
+  config), documented in place.
+- **Video pricing placeholders in `OR_MODELS`** — left deliberately wrong-but-labelled
+  rather than guessed at: the real figure varies by resolution and tier and comes back
+  per job as `cost_usd`. The estimate carries an explicit warning instead.
+
+---
+
+## Verification
+
+`npx tsc --noEmit` clean; `node --check` passes on all six `.mjs`; `bash -n` passes on
+all six `.sh`. Generation paths were exercised end-to-end against a local stub
+connector (no billed calls), confirming: `--characters` and role-less `asset:<id>`
+now reach the connector as `image_url`; `--quantity 2` returns and prints both URLs;
+an unknown role warns; the multi-`ref_image` warning still fires; `batch-generate.sh`
+defaults a missing duration to 15s and surfaces the real error text on failure.

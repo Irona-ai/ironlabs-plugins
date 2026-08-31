@@ -170,25 +170,6 @@ function parseArgs(argv) {
   return { files, dataUris, resolution, mode, model, temperature, temperatureExplicit, maxTokens, maxTokensExplicit, jsonMode, prompt: textParts.join(" ") };
 }
 
-// Upload a large file to IronLabs CDN and return a public URL.
-async function uploadToCdn(filePath, mimeType, base64) {
-  const filename = path.basename(filePath);
-  const resp = await fetch(`${BASE_URL}/upload`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${IRONLABS_API_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ filename, data: base64, mimeType }),
-  });
-  if (!resp.ok) {
-    const err = await resp.text();
-    throw new Error(`CDN upload failed (${resp.status}): ${err}`);
-  }
-  const json = await resp.json();
-  return json.data?.url;
-}
-
 // Build Irona-compatible content parts from files and inline data URIs
 async function buildContentParts(files, dataUris, prompt) {
   const parts = [];
@@ -207,16 +188,15 @@ async function buildContentParts(files, dataUris, prompt) {
     const data = await fs.readFile(filePath);
     const base64 = data.toString("base64");
 
+    // Files are sent inline as data: URIs; there is no hosting step. The API has
+    // no upload endpoint (POST /api/v1/upload is a 404), so the CDN path this used
+    // to attempt for oversized files could never succeed — it always failed and
+    // skipped the file anyway, just after a wasted round-trip. Say what to do
+    // instead, up front.
     if (stat.size > MAX_INLINE_SIZE) {
-      console.error(`${path.basename(filePath)} is >20MB — uploading to CDN...`);
-      try {
-        const url = await uploadToCdn(filePath, mimeType, base64);
-        parts.push({ type: "image_url", image_url: { url } });
-        console.error(`Uploaded: ${url}`);
-      } catch (err) {
-        console.error(`CDN upload failed: ${err.message}. Skipping file.`);
-        console.error(`  Alternative: ffmpeg -i "${filePath}" -vf "fps=1" frame_%04d.jpg`);
-      }
+      console.error(`Skipping ${path.basename(filePath)}: ${(stat.size / 1024 / 1024).toFixed(1)}MB exceeds the 20MB inline limit, and there is no upload endpoint to host it.`);
+      console.error(`  For a video, extract frames:  ffmpeg -i "${filePath}" -vf "fps=1" frame_%04d.jpg`);
+      console.error(`  For an image, downscale:      ffmpeg -i "${filePath}" -vf "scale=1600:-1" small.jpg`);
       continue;
     }
 

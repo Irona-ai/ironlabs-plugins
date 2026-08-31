@@ -182,7 +182,7 @@ Organize along a **second-by-second timeline** — six dimensions interwoven int
 ```bash
 node ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/ironlabs-cli.mjs task generate \
   --prompt "<prompt above>" --duration 14 --ratio 9:16 \
-  --materials "<person_material_id>:ref_image,<bag_material_id>:ref_image,<shirt_material_id>:ref_image" \
+  --materials "<composed_opening_still_id>:first_frame" \
   --tags "ecom,ugc,unboxing"
 ```
 
@@ -215,7 +215,7 @@ node ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/ironlabs-cli.mjs task generate \
 ```bash
 node ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/ironlabs-cli.mjs task generate \
   --prompt "<完整中文 prompt>" --duration 10 --ratio 9:16 \
-  --materials "<presenter_material_id>:ref_image,<foundation_material_id>:ref_image" \
+  --materials "<composed_opening_still_id>:first_frame" \
   --tags "ecom,ugc,beauty"
 ```
 

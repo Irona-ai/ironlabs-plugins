@@ -54,11 +54,11 @@ reference the camera movement of @Video 1    ← explicitly only partial feature
 
 | Reference type | Prompt syntax | `--materials` role | Notes |
 |---------------|--------------|---------------------------|-------|
-| Product / scene image(s) (no faces), incl. multi-reference | `@Image N` | `ID:ref_image` (1+) | Works on every video model — binds `@Image1`, `@Image2`, ... to each image in upload order via OpenRouter's `input_references` field. The connector caps the count per model (`maxInputReferences`); `bytedance/seedance-2.0` accepts the most. |
+| Product / scene image (no faces) — **one only** | plain description | `ID:ref_image` or `ID:first_frame` | `video_generate` takes a single still. Extra `ref_image` materials are ignored with a warning, and `@Image N` tokens have nothing to bind to — compose multiple references into one image first. |
 | Scene image with incidental faces (face NOT the reference target) | `@Image N` | `ID:ref_image` | Treat as scene ref |
 | Person image where face IS the character identity | `@Image N` | `ID:ref_image`, or `asset:ID:ref_image` if reused often | See Face Privacy Rule below — real faces may still be blocked regardless of upload path |
 | Reference video | — | **not supported** | No model accepts a video input — OpenRouter has no video-to-video mode. `ref_video` is a hard error. Chain your own segments with tail-frame → `first_frame` instead; for external style, use Gemini analysis. |
-| First frame | `@Image N` | `ID:first_frame` | Combines freely with `ref_image` in the same `--materials` flag |
+| First frame | plain description | `ID:first_frame` | The one still the video opens on. Takes precedence over any `ref_image` — they do not combine |
 
 **Face Privacy Rule**: Human faces passed as `ref_image` may trigger privacy detection in some OpenRouter video/image models. Unlike a hard, guaranteed block, this is model-dependent — but treat it as likely. Registering an image as an asset (`asset create`) does **not** bypass this check; asset registration is purely a reuse convenience, not a privacy workaround. When a real face photo is blocked, or as the default for any presenter/character face:
 
@@ -83,17 +83,17 @@ Do this automatically without waiting for a block — real face photos are the e
 4. **Confirm generation parameters**:
    - Duration: 5–15s per segment (the CLI accepts any integer in this range; over 15s → multi-segment chaining)
    - Aspect ratio: `16:9`, `9:16`, `1:1`, `4:3`, or `3:4`, based on the user's request
-   - Model — pass via `--model`, default is `x-ai/grok-imagine-video`:
+   - Model — **prefer omitting `--model`**: the default is `bytedance/seedance-2.0`, and leaving the flag off also lets the connector check whether this request already rendered under another video model before paying to generate it again.
 
 | Model | Notes |
 |-------|-------|
-| `x-ai/grok-imagine-video` | Default video model |
-| `kwaivgi/kling-v3.0-pro` | Alt video model, supports `last_frame` |
-| `bytedance/seedance-2.0` | Alt video model, highest `maxInputReferences` |
-| `alibaba/happyhorse-1.1` | Alt video model |
-| `google/gemini-3.1-flash-image-preview` | Image model |
+| `bytedance/seedance-2.0` | **Default video model** |
+| `x-ai/grok-imagine-video` | Alt video model |
+| `kwaivgi/kling-v3.0-pro` | Alt video model |
+| `alibaba/happyhorse-1.1` | Alt video model — not on MuAPI, always billed via OpenRouter |
+| `google/gemini-3.1-flash-image-preview` | **Default image model** |
 
-Full model/material/resolution details live in `Read ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/references/video-capabilities.md` and `Read ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/references/api-endpoints.md` — read those before picking a non-default model. All generation goes through the image/video connector, which enforces each model's capability limits server-side. Multi-reference/`@ImageN` binding works on every video model. `ref_video` works on none of them — OpenRouter has no video-to-video mode.
+Full model/material/resolution details live in `Read ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/references/video-capabilities.md` and `Read ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/references/api-endpoints.md` — read those before picking a non-default model. All generation goes through the image/video connector, which enforces each model's capability limits server-side. Multi-reference/`@ImageN` binding works on **no** model — video takes a single still. `ref_video` works on none of them either; OpenRouter has no video-to-video mode.
 
 > **Scenario D only**: After Phase 1, execute Phase 1.5 (asset pre-upload) before writing any prompt. See `scenario-d-ugc.md`.
 
@@ -128,11 +128,11 @@ Present the full prompt in the standard preview format and wait for explicit con
 [Full prompt in USER'S LANGUAGE, each dimension as its own paragraph, tagged with [维度名称] / [Dimension Name] in user's language]
 
 --- Asset Mapping ---
-@Image 1 → [filename / description] → role: ref_image
+Reference still → [filename / description] → role: first_frame (one still only)
 @Video 1 → [filename / description] → Gemini analysis only (NOT uploaded for generation)
 
 --- Generation Parameters ---
-Model: x-ai/grok-imagine-video
+Model: (omit --model unless a specific one is needed; default bytedance/seedance-2.0)
 Duration: N seconds
 Aspect ratio: W:H
 Estimated cost: run `ironlabs credit estimate --model <model> --duration <seconds>` (no API key required)
@@ -175,10 +175,9 @@ Record all `material_id` / `asset_id` values and their roles.
 ```bash
 node ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/ironlabs-cli.mjs task generate \
   --prompt "<prompt>" \
-  --model x-ai/grok-imagine-video \
   --duration <seconds> \
   --ratio <ratio> \
-  --materials "<id1>:<role1>,<id2>:<role2>"
+  --materials "<id>:first_frame"
 ```
 
 > **Scenario C multi-clip**: See assembly instructions in `scenario-c-tvc.md` under "Mode B: Multi-clip".
@@ -193,7 +192,7 @@ node ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/ironlabs-cli.mjs material upload 
 # → prints material_id
 node ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/ironlabs-cli.mjs task generate \
   --prompt "Continuing from the previous shot: <segment 2 prompt>" \
-  --materials "<S1_end_material_id>:first_frame,<other_materials>"
+  --materials "<S1_end_material_id>:first_frame"
 ```
 
 **Step 6 — Return results**
@@ -215,17 +214,19 @@ node "$CLI" asset create <path>
 
 # Generate video (blocks until done)
 node "$CLI" task generate \
-  --prompt "prompt" --model x-ai/grok-imagine-video \
+  --prompt "prompt" \
   --duration 10 --ratio 9:16 \
-  --materials "id1:ref_image,asset:id2:ref_image"
+  --materials "asset:id2:ref_image"
 
 # Check balance
 node "$CLI" credit me
 ```
 
-**`first_frame`, `last_frame`, and `ref_image` (any number) combine freely** in one `--materials` flag, e.g. `"CHAR_ID:ref_image,S1_END_ID:first_frame,SCENE_ID:ref_image"` (see the Serial Continuity examples in `SKILL.md`) — bind each `ref_image` with `@Image1`, `@Image2`, ... in the prompt. Two caveats, both enforced by the connector: `last_frame` is rejected on models that don't support it (including the default `x-ai/grok-imagine-video`), and `ref_image` is capped at each model's `maxInputReferences`.
+**Materials do NOT combine — video takes one still.** `video_generate` has a single `image_url` argument. The CLI sends the `first_frame` material, or the first `ref_image` if no first frame was given, and warns that anything else was ignored. `last_frame` is not supported on any model, and `ref_video` is a hard error. To use more than one reference, compose them into a single image with `image_generate` and pass that.
 
-**Timeout note**: Video generation takes ~3–10 minutes per segment and runs **asynchronously server-side** — `task create` returns immediately with status `"pending"`, and `task result <id>` does NOT wait (it returns without a `videoUrl` for a still-pending task). If `task generate` times out client-side, use `task create` followed by `task wait <id> --timeout 900` to block until the video finishes, then `task result <id>` to fetch it. Image tasks complete synchronously and don't need this. Estimate cost with `credit estimate --model <model> --duration <seconds>` (no API key needed) and check remaining balance with `credit me`.
+**Timing note**: Video generation is **synchronous** — `task generate` blocks for the whole render (~3–10 minutes per segment) and returns the finished asset. There is no pending state: `task create` blocks identically, and `task wait` is a no-op kept for script compatibility. Give the Bash call a long explicit timeout (15 min). If it fails, **re-run the generate command** — no task record is written on failure, so `task wait`/`task result` will report "not found", and the upstream job may already have been billed (check `credit me` first).
+
+**Cost**: `credit estimate --duration <seconds>` needs no API key, but **video estimates are unverified placeholders that have measured several times low** — use them to flag "this will be expensive", never to quote a price. The billed figure comes back on each result as `costUsd`.
 
 ---
 
@@ -245,8 +246,8 @@ node "$CLI" credit me
 ## Important Notes
 
 1. **Language**: Draft in user's language. Translate to English before the API call — except Scenario D (dialogue prompts stay in user's language for lip-sync)
-2. **Asset limits**: no documented hard cap on `ref_image` count — any number combine freely on the default model (`x-ai/grok-imagine-video` and other OpenRouter models), each bound via `@Image1`, `@Image2`, ... — see Asset Reference Rules above
+2. **Asset limits**: video takes exactly **one** still — extra `ref_image` materials are ignored with a warning, and `@Image1`/`@Image2` binding does not exist. Compose multiple references into one image first — see Asset Reference Rules above
 3. **Duration**: 5–15s per segment; use tail-frame → `first_frame` chaining for longer videos
 4. **Face privacy**: default to AI-generated portraits or text-only descriptions for any character/presenter face — don't rely on asset registration as a workaround
 5. **Aspect ratio**: Once confirmed, all reference images should match the same ratio
-6. **Cost**: run `credit estimate --model <model> --duration <seconds>` before generating (no API key needed, e.g. `x-ai/grok-imagine-video` at 10s is ~40 credits); check `credit me` for remaining balance and notify the user proactively if it's low
+6. **Cost**: run `credit estimate --duration <seconds>` before generating (no API key needed), but treat video figures as indicative only — they have measured several times below the billed amount. Check `credit me` for remaining balance and notify the user proactively if it's low
