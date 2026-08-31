@@ -82,11 +82,46 @@ function nextId() {
   return Date.now() * 1000 + ((pidSalt + idSequence++) % 1000);
 }
 
+// File-type detection for uploads. Kept in one place because the material,
+// character and asset paths all need the same answers — they each derived them
+// inline before, and the three copies of the video-extension list drifted in
+// both formatting and order.
+const VIDEO_EXTENSIONS = ["mp4", "mov", "avi", "webm", "mkv"];
+
+// Accepts a bare filename or a full path. Returns the lowercase extension with
+// no leading dot, falling back to "jpg" for an extensionless name.
+function fileExtension(nameOrPath) {
+  return extname(nameOrPath).slice(1).toLowerCase() || "jpg";
+}
+
+function isVideoFile(nameOrPath) {
+  return VIDEO_EXTENSIONS.includes(fileExtension(nameOrPath));
+}
+
+// An explicit `type` (from --type, or a caller that already resolved it) wins:
+// the extension is only a guess, and the caller may know better.
+function mimeTypeFor(nameOrPath, type) {
+  if (type === "video") return "video/mp4";
+  const ext = fileExtension(nameOrPath);
+  return ext === "png" ? "image/png"
+    : ext === "webp" ? "image/webp"
+    : "image/jpeg";
+}
+
+// Best-effort: the generation this record describes has already finished and
+// been billed, so a failed write must not turn it into a hard error. It is not
+// swallowed silently, though — this file is the only copy of the result URL, so
+// `task generate` would otherwise fail with a bare "Task not found" from the
+// waitForTask read that follows. Returns false so the caller can print the URL.
 function writeTask(id, data) {
   try {
     mkdirSync(TASK_DIR, { recursive: true });
     writeFileSync(join(TASK_DIR, `${id}.json`), JSON.stringify(data));
-  } catch {}
+    return true;
+  } catch (e) {
+    console.error(`Warning: could not save task #${id} to ${TASK_DIR} (${e?.message || e}). The generation succeeded, but "task result ${id}" will not find it.`);
+    return false;
+  }
 }
 function readTask(id) {
   try { return JSON.parse(readFileSync(join(TASK_DIR, `${id}.json`), "utf-8")); } catch { return null; }
@@ -110,11 +145,19 @@ function listLocalTasks(params = {}) {
     return tasks.slice(offset, offset + limit).map(({ _rawTags, ...t }) => t);
   } catch { return []; }
 }
+// Best-effort for the same reason as writeTask — the upload already happened.
+// Warned rather than swallowed because the id handed back to the user would
+// otherwise look valid while every later `--materials <id>` reference fails to
+// resolve it.
 function writeMaterial(id, data) {
   try {
     mkdirSync(MATERIAL_DIR, { recursive: true });
     writeFileSync(join(MATERIAL_DIR, `${id}.json`), JSON.stringify(data));
-  } catch {}
+    return true;
+  } catch (e) {
+    console.error(`Warning: could not save material ${id} to ${MATERIAL_DIR} (${e?.message || e}). Referencing it later with --materials will fail.`);
+    return false;
+  }
 }
 function readMaterial(id) {
   try { return JSON.parse(readFileSync(join(MATERIAL_DIR, `${id}.json`), "utf-8")); } catch { return null; }
@@ -145,36 +188,17 @@ function listLocalMaterials(params = {}) {
 // Per-model capability rules (durations, aspect ratios, MuAPI-vs-OpenRouter
 // routing) are deliberately NOT duplicated here — the connector owns them
 // server-side, so this CLI passes arguments through and lets the server decide.
-const OR_VIDEO_MODELS = [
-  "bytedance/seedance-2.0",
-  "x-ai/grok-imagine-video",
-  "kwaivgi/kling-v3.0-pro",
-  "alibaba/happyhorse-1.1",
-];
-const OR_IMAGE_MODELS = [
-  "google/gemini-3.1-flash-image-preview",
-  "google/gemini-3.1-flash-lite-image",
-  "google/gemini-3-pro-image-preview",
-  "google/gemini-2.5-flash-image",
-  "x-ai/grok-imagine-image-quality",
-  "bytedance-seed/seedream-4.5",
-];
-// Matches DEFAULT_MODEL in irona-chat's agentVideoGeneration.service.ts /
-// agentImageGeneration.service.ts — the defaults the connector itself applies.
-const DEFAULT_VIDEO_MODEL = "bytedance/seedance-2.0";
-const DEFAULT_IMAGE_MODEL = "google/gemini-3.1-flash-image-preview";
-
-// Upper bound on a single generate call. Generous enough for a slow video
-// render, but finite: fetch() has no timeout of its own, so without this a
-// stalled connection would hang the CLI indefinitely.
-const MCP_CALL_TIMEOUT_MS = 900_000;
-
-// Pricing estimates (USD per unit), keyed on the same real IDs. Display-only,
-// for "credit estimate" — the server reports the real figure as cost_usd, and
-// that is the number that gets billed. gemini-3.1-flash-image-preview (0.060)
-// and grok-imagine-image-quality (0.050) are measured against returned cost_usd;
-// the rest are rough placeholders, so treat "credit estimate" as indicative only.
-const OR_PRICING = {
+// One entry per model: its type and its pricing estimate. This is the single
+// place a model is declared — the video/image lists below are derived from it,
+// so adding a model here cannot leave it priced-but-unroutable or
+// routable-but-unpriced, which is what two hand-maintained lists allowed.
+//
+// Pricing is USD per unit and display-only, for "credit estimate" — the server
+// reports the real figure as cost_usd, and that is what gets billed.
+// gemini-3.1-flash-image-preview (0.060) and grok-imagine-image-quality (0.050)
+// are measured against returned cost_usd; the rest are rough placeholders, so
+// treat "credit estimate" as indicative only.
+const OR_MODELS = {
   "bytedance/seedance-2.0":    { type: "video", perSecond: 0.035 },
   "x-ai/grok-imagine-video":   { type: "video", perSecond: 0.040 },
   "kwaivgi/kling-v3.0-pro":    { type: "video", perSecond: 0.045 },
@@ -186,6 +210,21 @@ const OR_PRICING = {
   "x-ai/grok-imagine-image-quality":       { type: "image", flat: 0.050 },
   "bytedance-seed/seedream-4.5":           { type: "image", flat: 0.050 },
 };
+// Declaration order is preserved, so the first entry of each type is the
+// default and these read in the same order the help text prints them.
+const OR_MODEL_IDS = Object.keys(OR_MODELS);
+const OR_VIDEO_MODELS = OR_MODEL_IDS.filter(m => OR_MODELS[m].type === "video");
+const OR_IMAGE_MODELS = OR_MODEL_IDS.filter(m => OR_MODELS[m].type === "image");
+
+// Matches DEFAULT_MODEL in irona-chat's agentVideoGeneration.service.ts /
+// agentImageGeneration.service.ts — the defaults the connector itself applies.
+const DEFAULT_VIDEO_MODEL = "bytedance/seedance-2.0";
+const DEFAULT_IMAGE_MODEL = "google/gemini-3.1-flash-image-preview";
+
+// Upper bound on a single generate call. Generous enough for a slow video
+// render, but finite: fetch() has no timeout of its own, so without this a
+// stalled connection would hang the CLI indefinitely.
+const MCP_CALL_TIMEOUT_MS = 900_000;
 
 // Slug-tolerant resolver, mirroring irona-chat's resolveToORModel(): accepts a
 // full "provider/model" path or a bare "model" slug and expands it to the full
@@ -342,7 +381,7 @@ var IronlabsClient = class {
       model = resolveToORModel(params.model) ?? (params.model.includes("/") ? params.model : null);
       if (!model) return { credits: 0, note: `No pricing data for ${params.model}` };
     }
-    const pricing = OR_PRICING[model];
+    const pricing = OR_MODELS[model];
     if (!pricing) return { credits: 0, note: `No pricing data for ${model || "unknown model"}` };
     const usd = pricing.type === "video"
       ? (parseInt(params.duration) || 10) * pricing.perSecond // 10s matches the connector's own duration default
@@ -354,8 +393,14 @@ var IronlabsClient = class {
     if (!model) return false;
     const resolved = resolveToORModel(model);
     if (resolved) return OR_IMAGE_MODELS.includes(resolved);
-    // Unrecognized full provider/model path: fall back to a name heuristic so
-    // an arbitrary OpenRouter image model still routes to image_generate.
+    // The name heuristic is scoped to a full provider/model path, matching
+    // mapModel's escape hatch: that is the only unrecognized input that gets
+    // routed rather than rejected, so it is the only one worth guessing a type
+    // for. A bare unrecognized slug is a typo mapModel throws on moments later
+    // — guessing "image" for it would just decide how a doomed request is
+    // shaped, and would quietly become a real mis-route if that throw ever
+    // softened into a fallback.
+    if (!model.includes("/")) return false;
     return ["gemini", "flux", "ideogram", "gpt-image", "imagen"].some(k => model.includes(k));
   }
   mapModel(model, isImage) {
@@ -416,7 +461,9 @@ var IronlabsClient = class {
         source: orResult.source, costUsd: orResult.cost_usd,
         orResult,
       };
-      writeTask(taskId, stored);
+      // The stored record is the only copy of the URL, so surface it directly
+      // if it could not be written rather than losing a paid-for result.
+      if (!writeTask(taskId, stored)) console.error(`Image URL: ${imageUrl}`);
       console.error(`Done — served from ${orResult.source} ($${orResult.cost_usd}).`);
       return { task: { id: taskId, status: "completed", estimatedCredit } };
     } else {
@@ -472,7 +519,7 @@ var IronlabsClient = class {
         source: orResult.source, costUsd: orResult.cost_usd,
         orResult,
       };
-      writeTask(taskId, stored);
+      if (!writeTask(taskId, stored)) console.error(`Video URL: ${videoUrl}`);
       console.error(`Done — served from ${orResult.source} ($${orResult.cost_usd}).`);
       return { task: { id: taskId, status: "completed", estimatedCredit } };
     }
@@ -511,10 +558,7 @@ var IronlabsClient = class {
   // ---- Material ----
   async uploadMaterial(file, filename, type = "image") {
     const matId = nextId();
-    const ext = filename.split(".").pop()?.toLowerCase() || "jpg";
-    const mimeType = type === "video" ? "video/mp4"
-      : ext === "png" ? "image/png"
-      : ext === "webp" ? "image/webp" : "image/jpeg";
+    const mimeType = mimeTypeFor(filename, type);
     const b64 = Buffer.from(file).toString("base64");
 
     // Try CDN upload; fall back to local base64 if unavailable
@@ -566,26 +610,22 @@ var IronlabsClient = class {
   async importCharacters(file, filename) {
     if (!file || !filename) throw new ApiError(400, {}, "Usage: ironlabs character create <image-file>");
     const matId = nextId();
-    const ext = filename.split(".").pop()?.toLowerCase() || "jpg";
-    const mimeType = ext === "png" ? "image/png" : ext === "webp" ? "image/webp" : "image/jpeg";
+    // Characters are always stills, so pin the image branch rather than letting
+    // a video extension pick video/mp4.
+    const mimeType = mimeTypeFor(filename, "image");
     const dataUri = `data:${mimeType};base64,${Buffer.from(file).toString("base64")}`;
     writeMaterial(`char-${matId}`, { id: matId, name: filename, type: "character", dataUri });
     return { character: { id: matId, name: filename }, action: "created" };
-  }
-  async getCharacterImageUploadUrl() {
-    return { note: "Upload characters directly: ironlabs character create <image-file>" };
   }
   async addCharacterGrant() { return {}; }
   // ---- Asset (stored locally with key "asset-<id>") ----
   async createAsset(file, filename, type = "image") {
     if (!file || !filename) throw new ApiError(400, {}, "Usage: ironlabs asset create <file>");
     const matId = nextId();
-    const ext = filename.split(".").pop()?.toLowerCase() || "jpg";
-    const videoExts = ["mp4", "mov", "webm", "avi", "mkv"];
-    const assetType = (type === "video" || videoExts.includes(ext)) ? "video" : "image";
-    const mimeType = assetType === "video" ? "video/mp4"
-      : ext === "png" ? "image/png"
-      : ext === "webp" ? "image/webp" : "image/jpeg";
+    // Unlike uploadMaterial, the extension can promote an asset to video even
+    // when the caller left --type at its "image" default.
+    const assetType = (type === "video" || isVideoFile(filename)) ? "video" : "image";
+    const mimeType = mimeTypeFor(filename, assetType);
     const dataUri = `data:${mimeType};base64,${Buffer.from(file).toString("base64")}`;
     writeMaterial(`asset-${matId}`, { id: matId, name: filename, type: "asset", assetType, dataUri });
     return { asset: { id: matId, name: filename, type: assetType }, action: "created" };
@@ -608,12 +648,12 @@ var IronlabsClient = class {
     } catch { return { assets: [] }; }
   }
   async deleteAsset(id) {
+    // Already gone, or never existed — delete is idempotent here, and the
+    // caller only cares that the asset is absent afterwards.
     try { unlinkSync(join(MATERIAL_DIR, `asset-${id}.json`)); } catch {}
     return {};
   }
   async waitForAsset(id) { return this.getAsset(id); }
-  async createAssetGroup() { return { group: { id: nextId(), name: "default" } }; }
-  async listAssetGroups() { return []; }
 };
 
 // src/cli.ts
@@ -641,7 +681,11 @@ function loadEnv() {
         if (!process.env[key]) process.env[key] = val;
       }
       break;
-    } catch {}
+    } catch {
+      // No .env at this candidate path, or it isn't readable — try the next
+      // one. A missing .env is the normal case when config comes from real
+      // environment variables, so this must not be reported as a problem.
+    }
   }
 }
 function env(key, fallback) {
@@ -1020,9 +1064,7 @@ async function materialUpload(client, positional, flags) {
     console.error("Error: file path required.\nUsage: ironlabs material upload <file> [--type image|video]");
     process.exit(1);
   }
-  const ext = extname(filePath).toLowerCase();
-  const videoExts = [".mp4", ".mov", ".avi", ".webm", ".mkv"];
-  const type = flags.type || (videoExts.includes(ext) ? "video" : "image");
+  const type = flags.type || (isVideoFile(filePath) ? "video" : "image");
   const buffer = readFileSync(filePath);
   const filename = basename(filePath);
   console.log(`Uploading ${filename} (${type}, ${(buffer.byteLength / 1024).toFixed(1)}KB)...`);
@@ -1072,9 +1114,7 @@ async function assetCreate(client, positional, flags) {
     console.error("Error: file path required.\nUsage: ironlabs asset create <file> [--type image|video]");
     process.exit(1);
   }
-  const ext = extname(filePath).toLowerCase();
-  const videoExts = [".mp4", ".mov", ".avi", ".webm", ".mkv"];
-  const type = flags.type || (videoExts.includes(ext) ? "video" : "image");
+  const type = flags.type || (isVideoFile(filePath) ? "video" : "image");
   const buffer = readFileSync(filePath);
   const filename = basename(filePath);
   console.log(`Creating asset from ${filename} (${type}, ${(buffer.byteLength / 1024).toFixed(1)}KB)...`);

@@ -21,7 +21,7 @@ keyframes, posters and title cards, and stylized illustration.
 | Use case | How to steer it |
 |----------|-----------------|
 | Character design sheet, scene refs, drafts | Default prompt, no special handling |
-| Hero / final keyframe where fidelity matters | Describe lighting and lens explicitly; add `--seed` so you can reproduce the exact frame later |
+| Hero / final keyframe where fidelity matters | Describe lighting and lens explicitly; there is no seed flag, so keep the frame you like — save the returned image as a material and reference it rather than expecting a re-run to reproduce it |
 | Poster / title card with readable text or logos | Quote the exact text in the prompt and state its placement |
 | Stylized / painterly illustration | Style keywords in-prompt — "painterly", "illustration style", named medium |
 
