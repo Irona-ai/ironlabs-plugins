@@ -4,8 +4,8 @@
  * Visual analysis via Irona's LLM gateway (direct completions).
  * Zero npm dependencies — uses native fetch.
  * Auth: IRONLABS_API_KEY → POST /api/v1/chat/completions (SSE)
- * Model: google/gemini-3.5-flash (provider/model format required by IronLab's completions gateway;
- *   the underlying model may change without affecting this script's interface)
+ * Model: google-ai-studio/gemini-3.5-flash (provider/model format required by IronLab's completions
+ *   gateway; the underlying model may change without affecting this script's interface)
  *
  * Usage:
  *   node analyze.mjs "Explain quantum computing"
@@ -20,7 +20,7 @@
  *   --file <path>         Attach a local file (image/video). Repeatable. ≤20MB inline.
  *   --resolution <level>  low|medium|high|ultra_high (hint only, for prompt context)
  *   --mode <name>         Preset: product, video-script, style
- *   --model <name>        IronLabs model name (default: google/gemini-3.5-flash)
+ *   --model <name>        IronLabs model name (default: google-ai-studio/gemini-3.5-flash)
  *   --temperature <n>     Accepted but NOT supported by the gateway — ignored (warns on stderr)
  *   --max-tokens <n>      Accepted but NOT supported by the gateway — ignored (warns on stderr)
  *   --json                Request JSON-only response
@@ -145,7 +145,7 @@ function parseArgs(argv) {
   const dataUris = [];
   let resolution = "medium";
   let mode = null;
-  let model = "google/gemini-3.5-flash";
+  let model = "google-ai-studio/gemini-3.5-flash";
   let temperature = 1.0;
   let temperatureExplicit = false;
   let maxTokens = 8192;
@@ -328,7 +328,7 @@ Options:
   --data-uri <uri>      Inline base64 data URI (repeatable, e.g. "data:image/jpeg;base64,...")
   --resolution <level>  low / medium / high / ultra_high (hint only)
   --mode <name>         Preset: product, video-script, style
-  --model <name>        IronLabs model (default: google/gemini-3.5-flash)
+  --model <name>        IronLabs model (default: google-ai-studio/gemini-3.5-flash)
   --temperature <n>     Not supported by the gateway — ignored
   --max-tokens <n>      Not supported by the gateway — ignored
   --json                Request JSON-only response

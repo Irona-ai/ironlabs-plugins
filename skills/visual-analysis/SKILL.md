@@ -9,15 +9,16 @@ description: >
 allowed-tools: Bash, Read
 metadata:
   author: ironlabs
-  version: 0.2.1
+  version: 0.2.2
   category: video-production
   tags: [vision, multimodal, analysis]
 ---
 
 # Visual Analysis — Visual Understanding & Multimodal Analysis
 
-Multimodal analysis via Irona's LLM gateway (currently backed by Gemini 3.5 Flash — the underlying
-model can change without affecting this skill's interface). Zero npm dependencies, native `fetch` only.
+Multimodal analysis via Irona's LLM gateway (currently backed by `google-ai-studio/gemini-3.5-flash` —
+the underlying model can change without affecting this skill's interface). Zero npm dependencies,
+native `fetch` only.
 Handles images and videos (≤20MB inline). Files > 20MB: extract frames first.
 
 **Auth**: `IRONLABS_API_KEY`. Get one at https://studio.ironlabs.ai → API Keys.
@@ -120,7 +121,7 @@ node ${CLAUDE_SKILL_DIR}/scripts/analyze.mjs --json "Return a JSON object with n
 | `--file <path>`        | —                          | Attach local file (repeatable, ≤20MB inline)    |
 | `--data-uri <uri>`     | —                          | Inline base64 data URI (repeatable, for pasted images) |
 | `--resolution <level>` | `medium`                   | Hint only: `low` / `medium` / `high` / `ultra_high` |
-| `--model <name>`       | `google/gemini-3.5-flash`         | IronLabs model name                                |
+| `--model <name>`       | `google-ai-studio/gemini-3.5-flash` | IronLabs model name                            |
 | `--temperature <n>`    | `1.0`                      | Not supported by the Irona completions API — accepted for CLI compatibility but ignored (prints a warning) |
 | `--max-tokens <n>`     | `8192`                     | Not supported by the Irona completions API — accepted for CLI compatibility but ignored (prints a warning) |
 | `--json`               | off                        | Append JSON-only instruction to prompt          |

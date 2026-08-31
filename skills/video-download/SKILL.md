@@ -48,7 +48,7 @@ bash ${CLAUDE_SKILL_DIR}/scripts/download-video.sh '<URL>'
 ```
 
 The script handles everything automatically:
-- Extracts a platform-prefixed video ID (`yt-dQw4w9WgXcQ`, `tk-7571284267028729101`, `vid-aHR0cHM6Ly93d3`)
+- Extracts a platform-prefixed video ID (`yt-dQw4w9WgXcQ`, `tk-7571284267028729101`, `vid-a1b2c3d4e5f60718`)
 - Saves to `resources/references/<video_id>.mp4`
 - Skips download if file already exists (dedup)
 - Retries TikTok downloads with `--cookies-from-browser chrome` on failure
@@ -138,7 +138,12 @@ If the fallback script is unavailable, follow these steps:
 |----------|---------|------------|
 | YouTube | `watch?v=`, `shorts/`, `embed/`, `youtu.be/` → 11-char ID | `yt-dQw4w9WgXcQ` |
 | TikTok | 15+ digit numeric ID in URL | `tk-7571284267028729101` |
-| Other | Base64url of URL, first 16 chars | `vid-aHR0cHM6Ly93d3` |
+| TikTok short link | slug after `tiktok.com/` | `tk-ZMabcdef` |
+| Other | md5 of the full URL, first 16 hex chars | `vid-a1b2c3d4e5f60718` |
+
+The `vid-` hash covers the **whole** URL. Hashing a truncated encoding instead
+(e.g. the first 16 base64 chars) collides on the shared `https://www.` prefix,
+which silently makes every such URL dedup to one file.
 
 ## Troubleshooting
 
