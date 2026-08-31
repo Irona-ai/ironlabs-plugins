@@ -99,41 +99,55 @@ node ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/ironlabs-cli.mjs task generate \
 
 ---
 
-## Combining Anchors
+## Choosing the One Anchor
 
-Character refs, `first_frame`, and scene refs combine freely via `--materials`:
+**Anchors do not combine.** `video_generate` takes a single still: the CLI sends the
+`first_frame` material, or the first `ref_image` if no first frame was given, and warns
+that everything else was ignored. So each segment gets exactly one anchor, and the rest
+of the consistency work is done by the prompt text.
+
+`--materials` takes **material IDs**, not file paths — a path parses to `NaN` and the
+material is dropped. Upload each file first:
 
 ```bash
-# All anchors (character + continuity + environment)
---materials "assets/char.jpg:ref_image,generated/keyframes/S1-end.jpg:first_frame,assets/scene.jpg:ref_image"
-
-# Character + environment only (no continuity needed — first segment)
---materials "assets/char.jpg:ref_image,assets/scene.jpg:ref_image"
-
-# Environment only (B-roll, no characters)
---materials "assets/scene.jpg:ref_image"
+CLI=${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/ironlabs-cli.mjs
+CHAR=$(node "$CLI" material upload assets/char.jpg | jq -r '.material.id')
 ```
+
+Pick per segment, in this priority order:
+
+```bash
+# 1. Continuing from the previous segment → its extracted tail frame wins
+--materials "${S1_END}:first_frame"
+
+# 2. First segment, or a hard cut → the composed opening still
+--materials "${OPENING}:first_frame"
+
+# 3. Nothing to continue and no composed still → a single reference
+--materials "${CHAR}:ref_image"
+```
+
+To anchor a character *and* a location, compose them into one image with
+`image_generate` first, then pass that composite — that is the only way to get both.
 
 **Example workflow for a 3-segment project:**
-(Upload each new file with `material upload` to get its ID before referencing it in `--materials` — see [Combining Anchors](#combining-anchors) above.)
 ```
 Prep:
-  1. Generate character sheet → save to assets/char.jpg
-  2. Generate scene concepts in parallel → save to assets/scene-s1.jpg, assets/scene-s2.jpg
+  1. Generate character sheet → assets/char.jpg → upload → $CHAR
+  2. Compose the S1 opening frame (character in location) → upload → $S1_OPEN
 
 Generate (serial chain):
-  S1: task generate --materials "char:ref_image,scene-s1:ref_image"
-  → ffmpeg extract tail frame → generated/keyframes/S1-end.jpg
+  S1: task generate --materials "${S1_OPEN}:first_frame"
+  → ffmpeg extract tail frame → upload → $S1_END
 
-  S2: task generate --materials "char:ref_image,S1-end:first_frame,scene-s2:ref_image"
-  → ffmpeg extract tail frame → generated/keyframes/S2-end.jpg
+  S2: task generate --materials "${S1_END}:first_frame"
+  → ffmpeg extract tail frame → upload → $S2_END
 
-  S3: task generate --materials "char:ref_image,S2-end:first_frame,scene-s2:ref_image"
+  S3: task generate --materials "${S2_END}:first_frame"
 ```
 
-S1 has no `first_frame` — nothing to continue from. Add that anchor only from S2 onward.
-
-> Generations with multiple anchors take 8–12 min/segment.
+Every segment repeats the full character and location description verbatim in the
+prompt — with one anchor per segment, the text carries the consistency.
 
 ---
 

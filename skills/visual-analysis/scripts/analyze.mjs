@@ -4,8 +4,8 @@
  * Visual analysis via Irona's LLM gateway (direct completions).
  * Zero npm dependencies — uses native fetch.
  * Auth: IRONLABS_API_KEY → POST /api/v1/chat/completions (SSE)
- * Model: google/gemini-3.5-flash (provider/model format required by IronLab's completions gateway;
- *   the underlying model may change without affecting this script's interface)
+ * Model: google-ai-studio/gemini-3.5-flash (provider/model format required by IronLab's completions
+ *   gateway; the underlying model may change without affecting this script's interface)
  *
  * Usage:
  *   node analyze.mjs "Explain quantum computing"
@@ -20,7 +20,7 @@
  *   --file <path>         Attach a local file (image/video). Repeatable. ≤20MB inline.
  *   --resolution <level>  low|medium|high|ultra_high (hint only, for prompt context)
  *   --mode <name>         Preset: product, video-script, style
- *   --model <name>        IronLabs model name (default: google/gemini-3.5-flash)
+ *   --model <name>        IronLabs model name (default: google-ai-studio/gemini-3.5-flash)
  *   --temperature <n>     Accepted but NOT supported by the gateway — ignored (warns on stderr)
  *   --max-tokens <n>      Accepted but NOT supported by the gateway — ignored (warns on stderr)
  *   --json                Request JSON-only response
@@ -145,7 +145,7 @@ function parseArgs(argv) {
   const dataUris = [];
   let resolution = "medium";
   let mode = null;
-  let model = "google/gemini-3.5-flash";
+  let model = "google-ai-studio/gemini-3.5-flash";
   let temperature = 1.0;
   let temperatureExplicit = false;
   let maxTokens = 8192;
@@ -170,25 +170,6 @@ function parseArgs(argv) {
   return { files, dataUris, resolution, mode, model, temperature, temperatureExplicit, maxTokens, maxTokensExplicit, jsonMode, prompt: textParts.join(" ") };
 }
 
-// Upload a large file to IronLabs CDN and return a public URL.
-async function uploadToCdn(filePath, mimeType, base64) {
-  const filename = path.basename(filePath);
-  const resp = await fetch(`${BASE_URL}/upload`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${IRONLABS_API_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ filename, data: base64, mimeType }),
-  });
-  if (!resp.ok) {
-    const err = await resp.text();
-    throw new Error(`CDN upload failed (${resp.status}): ${err}`);
-  }
-  const json = await resp.json();
-  return json.data?.url;
-}
-
 // Build Irona-compatible content parts from files and inline data URIs
 async function buildContentParts(files, dataUris, prompt) {
   const parts = [];
@@ -207,16 +188,15 @@ async function buildContentParts(files, dataUris, prompt) {
     const data = await fs.readFile(filePath);
     const base64 = data.toString("base64");
 
+    // Files are sent inline as data: URIs; there is no hosting step. The API has
+    // no upload endpoint (POST /api/v1/upload is a 404), so the CDN path this used
+    // to attempt for oversized files could never succeed — it always failed and
+    // skipped the file anyway, just after a wasted round-trip. Say what to do
+    // instead, up front.
     if (stat.size > MAX_INLINE_SIZE) {
-      console.error(`${path.basename(filePath)} is >20MB — uploading to CDN...`);
-      try {
-        const url = await uploadToCdn(filePath, mimeType, base64);
-        parts.push({ type: "image_url", image_url: { url } });
-        console.error(`Uploaded: ${url}`);
-      } catch (err) {
-        console.error(`CDN upload failed: ${err.message}. Skipping file.`);
-        console.error(`  Alternative: ffmpeg -i "${filePath}" -vf "fps=1" frame_%04d.jpg`);
-      }
+      console.error(`Skipping ${path.basename(filePath)}: ${(stat.size / 1024 / 1024).toFixed(1)}MB exceeds the 20MB inline limit, and there is no upload endpoint to host it.`);
+      console.error(`  For a video, extract frames:  ffmpeg -i "${filePath}" -vf "fps=1" frame_%04d.jpg`);
+      console.error(`  For an image, downscale:      ffmpeg -i "${filePath}" -vf "scale=1600:-1" small.jpg`);
       continue;
     }
 
@@ -292,6 +272,10 @@ async function callCompletions(messages, model) {
   let result = "";
   const decoder = new TextDecoder();
   let buffer = "";
+  // The stream reports why it failed in a structured error event, then closes
+  // with a bare "[Error]" sentinel carrying no detail. Hold onto the message so
+  // the sentinel can report the real cause instead of just "[Error]".
+  let lastError = null;
 
   for await (const chunk of resp.body) {
     buffer += decoder.decode(chunk, { stream: true });
@@ -302,14 +286,25 @@ async function callCompletions(messages, model) {
       if (!line.startsWith("data: ")) continue;
       const raw = line.slice(6).trim();
       if (raw === "[DONE]") return result;
-      if (raw.startsWith("[Error]")) throw new Error(`Stream error: ${raw}`);
+      if (raw.startsWith("[Error]")) {
+        throw new Error(`Stream error: ${lastError ?? raw}`);
+      }
+      // Parsed outside the try so a throw below isn't swallowed as a parse failure.
+      let event;
       try {
-        const event = JSON.parse(raw);
-        if (event.type === "text" && event.text) {
-          result += event.text;
-        }
+        event = JSON.parse(raw);
       } catch {
-        // ignore unparseable lines
+        continue; // ignore unparseable lines
+      }
+      if (event.type === "error") {
+        const detail = event.message || "unknown error";
+        // A non-fatal error names one model that failed; another may still answer.
+        if (event.fatal) throw new Error(detail);
+        lastError = detail;
+        continue;
+      }
+      if (event.type === "text" && event.text) {
+        result += event.text;
       }
     }
   }
@@ -328,7 +323,7 @@ Options:
   --data-uri <uri>      Inline base64 data URI (repeatable, e.g. "data:image/jpeg;base64,...")
   --resolution <level>  low / medium / high / ultra_high (hint only)
   --mode <name>         Preset: product, video-script, style
-  --model <name>        IronLabs model (default: google/gemini-3.5-flash)
+  --model <name>        IronLabs model (default: google-ai-studio/gemini-3.5-flash)
   --temperature <n>     Not supported by the gateway — ignored
   --max-tokens <n>      Not supported by the gateway — ignored
   --json                Request JSON-only response

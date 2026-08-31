@@ -98,6 +98,36 @@ function isVideoFile(nameOrPath) {
   return VIDEO_EXTENSIONS.includes(fileExtension(nameOrPath));
 }
 
+// The connector distinguishes exactly two material roles: the still used as the
+// video's first frame, and a plain reference still. Everything a caller can type
+// is normalized down to those two here, so a role spelled a reasonable-but-wrong
+// way anchors the generation instead of being silently dropped.
+//
+// `reference_image` is the one that mattered: it was the default role for
+// `--characters` and for a role-less `asset:<id>`, and it matched neither the
+// `ref_image` nor the `first_frame` filter in createTask — so every character
+// reference was quietly discarded and the generation ran unanchored at full price.
+const ROLE_ALIASES = {
+  reference_image: "ref_image",
+  reference: "ref_image",
+  ref: "ref_image",
+  image: "ref_image",
+  start_frame: "first_frame",
+  first: "first_frame",
+  end_frame: "last_frame",
+  last: "last_frame",
+};
+const KNOWN_ROLES = new Set(["ref_image", "first_frame", "last_frame", "ref_video"]);
+
+// Unrecognized roles are passed through unchanged rather than coerced: createTask
+// warns about `last_frame` and rejects `ref_video` by name, and a typo should
+// surface as "not used" rather than silently becoming a reference image.
+function normalizeRole(role) {
+  if (!role) return "ref_image";
+  const key = String(role).trim().toLowerCase();
+  return ROLE_ALIASES[key] ?? key;
+}
+
 // An explicit `type` (from --type, or a caller that already resolved it) wins:
 // the extension is only a guess, and the caller may know better.
 function mimeTypeFor(nameOrPath, type) {
@@ -198,6 +228,13 @@ function listLocalMaterials(params = {}) {
 // gemini-3.1-flash-image-preview (0.060) and grok-imagine-image-quality (0.050)
 // are measured against returned cost_usd; the rest are rough placeholders, so
 // treat "credit estimate" as indicative only.
+//
+// The video perSecond figures are known to understate badly: a measured 5s
+// bytedance/seedance-2.0 render billed $0.815 ($0.163/s), ~4.6x the 0.035 here.
+// They are left as-is deliberately — the real price comes back from MuAPI per
+// job (cost.amount_usd) and varies with resolution and tier, so no local table
+// can be authoritative. Video estimates therefore carry an explicit warning
+// rather than a fabricated-precision number.
 const OR_MODELS = {
   "bytedance/seedance-2.0":    { type: "video", perSecond: 0.035 },
   "x-ai/grok-imagine-video":   { type: "video", perSecond: 0.040 },
@@ -383,10 +420,21 @@ var IronlabsClient = class {
     }
     const pricing = OR_MODELS[model];
     if (!pricing) return { credits: 0, note: `No pricing data for ${model || "unknown model"}` };
+    // Images bill per rendered image, so a --quantity of 4 costs four times the
+    // flat rate — quoting the single-image price for it understated by 4x.
+    const quantity = Math.max(1, Math.min(parseInt(params.quantity) || 1, 4));
     const usd = pricing.type === "video"
       ? (parseInt(params.duration) || 10) * pricing.perSecond // 10s matches the connector's own duration default
-      : pricing.flat;
-    return { credits: Math.ceil(usd * 100), usd: parseFloat(usd.toFixed(4)), model };
+      : pricing.flat * quantity;
+    const estimate = { credits: Math.ceil(usd * 100), usd: parseFloat(usd.toFixed(4)), model };
+    if (pricing.type === "image" && quantity > 1) estimate.quantity = quantity;
+    // Video rates are unmeasured placeholders that have been observed to
+    // understate the billed figure several-fold — say so rather than let the
+    // number read as a quote.
+    if (pricing.type === "video") {
+      estimate.note = "Indicative only — video rates are unverified placeholders and have measured several times low. Actual cost is whatever the server returns as costUsd.";
+    }
+    return estimate;
   }
   // ---- Task ----
   isImageModel(model) {
@@ -401,7 +449,11 @@ var IronlabsClient = class {
     // shaped, and would quietly become a real mis-route if that throw ever
     // softened into a fallback.
     if (!model.includes("/")) return false;
-    return ["gemini", "flux", "ideogram", "gpt-image", "imagen"].some(k => model.includes(k));
+    // "gemini" alone is not evidence of an image model — google/gemini-3.5-flash is
+    // a text model, and routing it to image_generate would bill an image render for
+    // a path the caller clearly meant as text. Require an explicitly image-shaped
+    // name instead.
+    return ["flux", "ideogram", "gpt-image", "imagen", "seedream", "image"].some(k => model.includes(k));
   }
   mapModel(model, isImage) {
     if (!model) return isImage ? DEFAULT_IMAGE_MODEL : DEFAULT_VIDEO_MODEL;
@@ -432,7 +484,7 @@ var IronlabsClient = class {
     // would silently cost every user that cache tier.
     const model = params.model ? this.mapModel(params.model, isImage) : undefined;
     const effectiveModel = model ?? (isImage ? DEFAULT_IMAGE_MODEL : DEFAULT_VIDEO_MODEL);
-    const { credits: estimatedCredit } = await this.estimateCost({ model: params.model, duration: params.duration });
+    const { credits: estimatedCredit } = await this.estimateCost({ model: params.model, duration: params.duration, quantity: params.quantity });
     if (isImage) {
       // image_generate — synchronous; returns { images: [url], source, model, cost_usd }
       const orArgs = { prompt: params.prompt };
@@ -448,22 +500,33 @@ var IronlabsClient = class {
       if (params.resolution) {
         console.error(`Note: --resolution has no effect on image generation — image size is controlled by --ratio. Ignoring "${params.resolution}".`);
       }
-      console.log(`Generating image via the IronLabs image connector (${effectiveModel})...`);
+      console.error(`Generating image via the IronLabs image connector (${effectiveModel})...`);
       const orResult = await this.mcpCall("image_generate", orArgs);
-      const imageUrl = orResult.images?.[0] ?? null;
+      // `quantity` renders (and bills) N images. Keep all of them: storing only
+      // images[0] silently threw away everything the user paid for beyond the
+      // first. `imageUrl` stays as the first one so existing scripts and the
+      // task-chain path keep working unchanged.
+      const imageUrls = Array.isArray(orResult.images) ? orResult.images.filter(Boolean) : [];
+      const imageUrl = imageUrls[0] ?? null;
       if (!imageUrl) throw new ApiError(500, orResult, "The image connector did not return an image");
+      const requested = params.quantity || 1;
+      if (imageUrls.length < requested) {
+        console.error(`Note: ${requested} image(s) requested but the connector returned ${imageUrls.length}.`);
+      }
       await refreshBalanceCache(this);
       const stored = {
         taskId, status: "completed",
         model: orResult.model || effectiveModel, prompt: params.prompt,
         tags: params.tags || [],
-        videoUrl: null, imageUrl,
+        videoUrl: null, imageUrl, imageUrls,
         source: orResult.source, costUsd: orResult.cost_usd,
         orResult,
       };
-      // The stored record is the only copy of the URL, so surface it directly
+      // The stored record is the only copy of the URLs, so surface them directly
       // if it could not be written rather than losing a paid-for result.
-      if (!writeTask(taskId, stored)) console.error(`Image URL: ${imageUrl}`);
+      if (!writeTask(taskId, stored)) {
+        for (const u of imageUrls) console.error(`Image URL: ${u}`);
+      }
       console.error(`Done — served from ${orResult.source} ($${orResult.cost_usd}).`);
       return { task: { id: taskId, status: "completed", estimatedCredit } };
     } else {
@@ -506,7 +569,7 @@ var IronlabsClient = class {
         }
         orArgs.resolution = resolved;
       }
-      console.log(`Generating video via the IronLabs video connector (${effectiveModel})... this call blocks until the render finishes.`);
+      console.error(`Generating video via the IronLabs video connector (${effectiveModel})... this call blocks until the render finishes.`);
       const orResult = await this.mcpCall("video_generate", orArgs);
       const videoUrl = orResult.url ?? null;
       if (!videoUrl) throw new ApiError(500, orResult, "The video connector did not return a video URL");
@@ -556,35 +619,28 @@ var IronlabsClient = class {
     return result;
   }
   // ---- Material ----
+  // Warn above this size: an inline data: URI is re-sent in full on every generate
+  // call that references it, so a large material makes each request slow.
+  static INLINE_WARN_BYTES = 8 * 1024 * 1024;
+
   async uploadMaterial(file, filename, type = "image") {
     const matId = nextId();
     const mimeType = mimeTypeFor(filename, type);
     const b64 = Buffer.from(file).toString("base64");
 
-    // Try CDN upload; fall back to local base64 if unavailable
-    let url = null;
-    if (this.apiKey) {
-      try {
-        const resp = await fetch(`${this.baseUrl}/upload`, {
-          method: "POST",
-          headers: { Authorization: `Bearer ${this.apiKey}`, "Content-Type": "application/json" },
-          body: JSON.stringify({ filename, data: b64, mimeType }),
-        });
-        if (resp.ok) {
-          const json = await resp.json();
-          url = json.data?.url ?? null;
-        }
-      } catch {
-        // fall through to local storage
-      }
+    // Materials are embedded as inline data: URIs rather than hosted. There is no
+    // upload endpoint on the API: `POST /api/v1/upload` is a 404 (the only route
+    // under /uploads is pdf-proxy), so the "try the CDN, fall back to inline" path
+    // this used to take never once succeeded — it just cost every upload a doomed
+    // round-trip and printed a failure note. Inline is the real, working path: the
+    // connector stages inline references into R2 before handing them to MuAPI.
+    if (file.byteLength > IronlabsClient.INLINE_WARN_BYTES) {
+      console.error(`Note: ${filename} is ${(file.byteLength / 1024 / 1024).toFixed(1)}MB and is embedded inline, so every generate call referencing it re-uploads that much. Downscale it if generation feels slow.`);
     }
 
-    const entry = url
-      ? { id: matId, name: filename, type, url }
-      : { id: matId, name: filename, type, dataUri: `data:${mimeType};base64,${b64}` };
-
+    const entry = { id: matId, name: filename, type, dataUri: `data:${mimeType};base64,${b64}` };
     writeMaterial(matId, entry);
-    return { material: { id: matId, name: filename, type, url }, action: "uploaded" };
+    return { material: { id: matId, name: filename, type, url: null }, action: "uploaded" };
   }
   async listMaterials(params = {}) {
     return { materials: listLocalMaterials(params) };
@@ -791,14 +847,20 @@ Options for generate/create:
   --duration <seconds>        Video duration (server default: 10)
   --ratio <w:h>               Aspect ratio (server default: 16:9)
   --resolution <1k|2k|4k>     Video resolution — 1k=720p, 2k/4k=1080p (ignored for images)
-  --quantity <1-4>            How many images to generate (image models; default 1)
+  --quantity <1-4>            How many images to generate (image models; default 1).
+                               All of them are kept — "task result" lists every URL.
+                               Each one is billed, so 4 costs 4x a single image.
   --no-audio                  Render the video silent. Leave this off unless asked: it scopes
                                the cache key and forces the request off the cheaper MuAPI tier.
   --tags <a,b,c>              Comma-separated tags
   --materials <spec>          Material refs: "id:role" or "id1:role1,id2:role2"
-                               Roles: ref_image, first_frame
+                               Roles: ref_image (default), first_frame
+                               "reference_image" is accepted as an alias for ref_image.
+                               A registered asset is "asset:<id>:<role>".
                                Video takes a single still, used as the first frame. Extra
                                ref_image entries and last_frame are ignored with a warning.
+  --characters <spec>         Character refs from "character create": "id" or "id:role"
+                               (role defaults to ref_image). Combines with --materials.
 
 Models:
   Video
@@ -877,7 +939,8 @@ Commands:
   create <image-file>         Save an image as a character reference
 
 Characters are stored locally in ~/.ironlabs/materials/ as base64.
-Pass to generation with: --characters "<id>:reference_image"
+Pass to generation with: --characters "<id>:ref_image"
+(the role may be omitted — it defaults to ref_image)
 
 Examples:
   ironlabs character list
@@ -916,11 +979,15 @@ Commands:
 Options for estimate:
   --model <id>                Model id (default: bytedance/seedance-2.0)
   --duration <seconds>        Video duration for video models (default: 10)
+  --quantity <1-4>            Image count for image models (default: 1) — each is billed
+
+Video estimates are unverified placeholders and have measured several times low.
+Treat them as indicative only; the billed figure is the costUsd the server returns.
 
 Examples:
   ironlabs credit me
   ironlabs credit estimate --model bytedance/seedance-2.0 --duration 10
-  ironlabs credit estimate --model google/gemini-3.1-flash-image-preview
+  ironlabs credit estimate --model google/gemini-3.1-flash-image-preview --quantity 4
 `.trim();
 async function taskGenerate(client, flags) {
   if (!flags.prompt) {
@@ -1067,12 +1134,12 @@ async function materialUpload(client, positional, flags) {
   const type = flags.type || (isVideoFile(filePath) ? "video" : "image");
   const buffer = readFileSync(filePath);
   const filename = basename(filePath);
-  console.log(`Uploading ${filename} (${type}, ${(buffer.byteLength / 1024).toFixed(1)}KB)...`);
+  console.error(`Uploading ${filename} (${type}, ${(buffer.byteLength / 1024).toFixed(1)}KB)...`);
   const data = await client.uploadMaterial(buffer, filename, type);
   if (data.action === "exists") {
-    console.log(`Material already exists: #${data.material.id}`);
+    console.error(`Material already exists: #${data.material.id}`);
   } else {
-    console.log(`Material uploaded: #${data.material.id}`);
+    console.error(`Material uploaded: #${data.material.id}`);
   }
   json(data);
 }
@@ -1099,9 +1166,9 @@ async function characterCreate(client, positional, flags) {
   }
   const buffer = readFileSync(filePath);
   const filename = basename(filePath);
-  console.log(`Creating character from ${filename} (${(buffer.byteLength / 1024).toFixed(1)}KB)...`);
+  console.error(`Creating character from ${filename} (${(buffer.byteLength / 1024).toFixed(1)}KB)...`);
   const data = await client.importCharacters(buffer, filename);
-  console.log(`Character #${data.character.id} created — use as: --characters "${data.character.id}:reference_image"`);
+  console.error(`Character #${data.character.id} created — use as: --characters "${data.character.id}:ref_image"`);
   json(data);
 }
 async function characterGrant(client, positional) {
@@ -1117,9 +1184,9 @@ async function assetCreate(client, positional, flags) {
   const type = flags.type || (isVideoFile(filePath) ? "video" : "image");
   const buffer = readFileSync(filePath);
   const filename = basename(filePath);
-  console.log(`Creating asset from ${filename} (${type}, ${(buffer.byteLength / 1024).toFixed(1)}KB)...`);
+  console.error(`Creating asset from ${filename} (${type}, ${(buffer.byteLength / 1024).toFixed(1)}KB)...`);
   const data = await client.createAsset(buffer, filename, type);
-  console.log(`Asset #${data.asset.id} created — use as: --materials "asset:${data.asset.id}:ref_image"`);
+  console.error(`Asset #${data.asset.id} created — use as: --materials "asset:${data.asset.id}:ref_image"`);
   json(data);
 }
 async function assetRegister(client, positional, flags) {
@@ -1186,21 +1253,26 @@ function buildCreateParams(flags) {
       const parts = m.trim().split(":");
       if (parts[0] === "asset") {
         const assetId = parseInt(parts[1]);
-        const role = parts[2] || "reference_image";
-        allMaterials.push({ user_asset_id: assetId, role });
+        allMaterials.push({ user_asset_id: assetId, role: normalizeRole(parts[2]) });
       } else {
         const [id, role] = parts;
-        allMaterials.push({ id: parseInt(id), role: role || "ref_image" });
+        allMaterials.push({ id: parseInt(id), role: normalizeRole(role) });
       }
     }
   }
   if (flags.characters) {
     for (const m of flags.characters.split(",")) {
-      const trimmed = m.trim();
-      const parts = trimmed.split(":");
+      const parts = m.trim().split(":");
       const charId = parseInt(parts[0]);
-      const role = parts[1] || "reference_image";
-      allMaterials.push({ character_id: charId, role });
+      allMaterials.push({ character_id: charId, role: normalizeRole(parts[1]) });
+    }
+  }
+  // A role the connector has no concept of would otherwise reach createTask, match
+  // none of its filters, and be dropped without a word — the exact failure mode the
+  // `reference_image` alias caused. Say so up front instead.
+  for (const mat of allMaterials) {
+    if (!KNOWN_ROLES.has(mat.role)) {
+      console.error(`Warning: unknown material role "${mat.role}" — it will not be used. Valid roles: ref_image, first_frame.`);
     }
   }
   if (allMaterials.length) params.materials = allMaterials;
@@ -1209,7 +1281,13 @@ function buildCreateParams(flags) {
 function printResult(result) {
   console.error(`Task #${result.taskId}  ${result.status}`);
   if (result.videoUrl) console.error(`  Video: ${result.videoUrl}`);
-  if (result.imageUrl) console.error(`  Image: ${result.imageUrl}`);
+  // Records written before imageUrls existed only carry the single imageUrl.
+  const images = result.imageUrls?.length ? result.imageUrls : (result.imageUrl ? [result.imageUrl] : []);
+  if (images.length === 1) {
+    console.error(`  Image: ${images[0]}`);
+  } else {
+    images.forEach((u, i) => console.error(`  Image ${i + 1}/${images.length}: ${u}`));
+  }
   // Which tier of the server chain served this, and what it actually cost.
   if (result.source) console.error(`  Source: ${result.source}${result.costUsd !== undefined ? `  ($${result.costUsd})` : ""}`);
   json(result);
@@ -1242,14 +1320,14 @@ async function main() {
   // credit estimate is pure local math — no API key needed
   if (domain === "credit" && action === "estimate") {
     const client = createClient(flags["base-url"], true);
-    json(await client.estimateCost({ model: flags.model, duration: flags.duration }));
+    json(await client.estimateCost({ model: flags.model, duration: flags.duration, quantity: flags.quantity }));
     return;
   }
   const baseUrlOverride = flags["base-url"] || null;
   const localOnlyDomains = new Set(["character", "asset"]);
   const client = createClient(baseUrlOverride, localOnlyDomains.has(domain));
   if (baseUrlOverride) {
-    console.log(`ℹ️  Using API: ${baseUrlOverride}`);
+    console.error(`ℹ️  Using API: ${baseUrlOverride}`);
   }
   try {
     switch (domain) {

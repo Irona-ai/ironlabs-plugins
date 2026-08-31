@@ -42,11 +42,14 @@ If it outputs `SET`, skip to Step 3.
 ## Step 3: Verify the Connection
 
 ```bash
-curl -s "${IRONLABS_BASE_URL:-https://www.chat.ironlabs.ai/api/v1}/chat/model" \
-  -H "Authorization: Bearer ${IRONLABS_API_KEY}" | head -c 200
+curl -s -o /dev/null -w '%{http_code}\n' \
+  "${IRONLABS_BASE_URL:-https://www.chat.ironlabs.ai/api/v1}/chat/balance" \
+  -H "Authorization: Bearer ${IRONLABS_API_KEY}"
 ```
 
-A successful response is a JSON array. If you get a `401`, the key is invalid — ask the user to double-check and re-enter it.
+`200` means the key is good. A `401` means it is invalid — ask the user to double-check and re-enter it.
+
+Verify against `/chat/balance`, not `/chat/model`: `/chat/model` is public and answers `200` even with no key at all, so it will green-light anything the user pastes.
 
 ## Step 4: Optional — Set a Custom Base URL
 

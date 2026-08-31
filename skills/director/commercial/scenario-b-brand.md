@@ -59,5 +59,5 @@
 ```bash
 node ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/ironlabs-cli.mjs task generate \
   --prompt "<prompt>" --duration 5 --ratio 16:9 \
-  --materials "<product_material_id>:ref_image,<scene_material_id>:ref_image" --tags "brand-film"
+  --materials "<product_material_id>:ref_image" --tags "brand-film"
 ```

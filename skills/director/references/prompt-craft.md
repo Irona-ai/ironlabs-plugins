@@ -121,16 +121,22 @@ Follow each dialogue line with the lip-sync instruction. Keep dialogue lines und
 
 ## Referencing Materials in Prompts
 
-When you attach reference images as `--materials`, describe them in the prompt so the model knows which image maps to which character or object.
+Video takes **one** reference still. Attach the single most important one, and carry
+everything else in the prompt text — the description is doing most of the work either
+way, so write the `[CHARACTER]` and `[SCENE]` blocks in full regardless of what you
+attach.
 
 ```bash
 CLI=${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/ironlabs-cli.mjs
 CHAR=$(node "$CLI" material upload assets/char-woman.jpg | jq -r '.material.id')
-SCENE=$(node "$CLI" material upload assets/scene-hallway.jpg | jq -r '.material.id')
 node "$CLI" task generate \
   --prompt "<prompt>" --duration 15 --ratio 16:9 \
-  --materials "${CHAR}:ref_image,${SCENE}:ref_image"
+  --materials "${CHAR}:ref_image"
 ```
+
+Attaching a second `ref_image` is not an error — the CLI sends the first and warns that
+the rest were ignored. To anchor two things at once, compose them into one image with
+`image_generate` and pass that composite as `first_frame`.
 
 In the prompt, describe each material by its role:
 
@@ -144,22 +150,38 @@ Dimly lit apartment hallway, warm pendant light overhead...
 
 This plain-language description works on every model and is always safe to use.
 
-### `@Image1` / `@Image2` binding — works on the default model, no switch needed
+### `@Image1` / `@Image2` binding — NOT available, do not use
 
-This is a real, confirmed feature on `x-ai/grok-imagine-video` (and every other OpenRouter video model) directly — attaching 2+ `ref_image` materials now genuinely reaches the model via OpenRouter's `input_references` field, with `@Image1`, `@Image2`, ... binding to upload order:
+`video_generate` takes exactly **one** still, in its `image_url` argument. There is no
+`reference_image_urls` field and no `input_references` on any model reachable through
+the connector, so `@Image1` / `@Image2` tokens have nothing to bind to — they are read
+as literal text and degrade the prompt.
+
+Attaching two or more `ref_image` materials is not an error: the CLI sends the first
+and warns that the rest were ignored. **Plain-language description is the only way to
+convey a second reference.**
+
+To genuinely combine two references, compose them into a single image first, then pass
+that composite as the one still:
 
 ```bash
 CLI=${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/ironlabs-cli.mjs
-CHAR=$(node "$CLI" material upload assets/char-woman.jpg | jq -r '.material.id')
-SCENE=$(node "$CLI" material upload assets/scene-hallway.jpg | jq -r '.material.id')
+
+# 1. Compose the character into the scene as one image
 node "$CLI" task generate \
-  --prompt "@Image1 reaches into the case and pulls out the thermos. @Image2 (the hallway) is visible behind her." \
-  --materials "${CHAR}:ref_image,${SCENE}:ref_image"
+  --model google/gemini-3.1-flash-image-preview --ratio 16:9 \
+  --prompt "<woman in the described wardrobe, standing in the dim apartment hallway>"
+
+# 2. Download it, upload as a material, use it as the single still
+curl -s -o composite.png "<image_url_from_result>"
+COMP=$(node "$CLI" material upload composite.png | jq -r '.material.id')
+node "$CLI" task generate \
+  --prompt "She reaches into the case and pulls out the thermos. <full [CHARACTER] and [SCENE] blocks>" \
+  --materials "${COMP}:first_frame" --duration 15
 ```
 
-Still keep the full `[CHARACTER]` / `[SCENE]` plain-language blocks in the prompt alongside the `@ImageN` tokens; the binding supplements the description, it doesn't replace it.
-
-The connector caps the reference count per model via `maxInputReferences` — `bytedance/seedance-2.0` accepts the most if you need more than four.
+Always keep the full `[CHARACTER]` / `[SCENE]` plain-language blocks in the prompt —
+with no multi-image binding available, the text is doing all of the work.
 
 ---
 

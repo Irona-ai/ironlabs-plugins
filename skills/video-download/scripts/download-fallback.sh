@@ -42,7 +42,9 @@ echo "Pasting URL and parsing..."
 # to the button lookup below. A more robust fix would target by element role/
 # accessible-name if agent-browser's snapshot format exposes one.
 SNAPSHOT=$(agent-browser snapshot 2>/dev/null)
-INPUT_REF=$(echo "$SNAPSHOT" | grep -oP '@\w+' | head -1)
+# `|| true` so a no-match falls through to the check below instead of having
+# `set -e` kill the script before it can print the error.
+INPUT_REF=$(echo "$SNAPSHOT" | grep -oE '@[A-Za-z0-9_]+' | head -1 || true)
 
 if [ -z "$INPUT_REF" ]; then
   echo "FAILED: Could not find input field on GreenVideo"
@@ -55,11 +57,13 @@ sleep 1
 
 # Find and click the start/parse button
 SNAPSHOT2=$(agent-browser snapshot 2>/dev/null)
-BUTTON_REF=$(echo "$SNAPSHOT2" | grep -i -oP '@\w+(?=.*(?:start|parse|download))' | head -1)
+# Narrow to lines mentioning the action, then take the ref off that line.
+# (Done in two greps because BSD grep has no -P and so no lookahead.)
+BUTTON_REF=$(echo "$SNAPSHOT2" | grep -iE 'start|parse|download' | grep -oE '@[A-Za-z0-9_]+' | head -1 || true)
 
 if [ -z "$BUTTON_REF" ]; then
   # Fallback: try clicking the first button-like element
-  BUTTON_REF=$(echo "$SNAPSHOT2" | grep -oP '@\w+' | sed -n '2p')
+  BUTTON_REF=$(echo "$SNAPSHOT2" | grep -oE '@[A-Za-z0-9_]+' | sed -n '2p')
 fi
 
 agent-browser click "$BUTTON_REF" 2>/dev/null

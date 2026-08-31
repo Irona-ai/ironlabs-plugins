@@ -6,14 +6,18 @@ Model reference only. For prompt writing guidance, see `Read ${CLAUDE_SKILL_DIR}
 
 | Parameter | Value |
 |-----------|-------|
-| Default model | `x-ai/grok-imagine-video` |
+| Default model | `bytedance/seedance-2.0` |
 | Min duration | 5 seconds |
 | Max duration | 15 seconds |
 | Duration options | Any integer 5–15s |
-| Resolution | Up to 1080p |
+| Default duration | 10s (server-side, when `--duration` is omitted) |
+| Resolution | 720p default, up to 1080p |
 | Aspect ratios | `16:9`, `9:16`, `1:1`, `4:3`, `3:4` |
 
-Override with the `--model` flag.
+Override with the `--model` flag. Note that naming a model **disables the
+connector's cross-model cache peek** — with no `--model` it checks whether the
+same request has already been rendered under any other video model before paying
+to generate. Leave it off unless a specific model is actually required.
 
 ---
 
@@ -56,11 +60,16 @@ Override with the `--model` flag.
 - **⚠️ Privacy detection**: Images with realistic human faces may be blocked
 - Suitable for: product photos (no faces), landscapes, illustrations, scene refs
 
-### Multi-Reference-to-Video (works on the default model)
-- Material role: `ref_image`, 2 or more
-- Bind each to `@Image1`, `@Image2`, ... in `--prompt`, in upload order — confirmed working directly on `x-ai/grok-imagine-video` via OpenRouter's `input_references` field, no model switch needed
-- The connector caps the reference count per model (`maxInputReferences`) — `bytedance/seedance-2.0` takes the most
-- Same privacy-detection caveat applies to any reference image with a real face
+### Multi-Reference-to-Video — NOT AVAILABLE
+`video_generate` takes exactly **one** still, in its `image_url` argument. There is
+no `reference_image_urls` field and no `input_references` on any model reachable
+through the connector, so `@Image1`/`@Image2` prompt tokens have nothing to bind to
+and multi-reference is not a mode that exists here.
+
+Passing two or more `ref_image` materials is not an error — the CLI sends the first
+and prints a warning that the rest were ignored. To combine several references,
+compose them into a single image first with `image_generate`, then pass that
+composite as the one still.
 
 ### Best Practices
 Default to **Text-to-Video**. Only use reference materials for:
@@ -73,7 +82,7 @@ Default to **Text-to-Video**. Only use reference materials for:
 
 ## Duration Strategy
 
-`--duration` accepts any integer 5–15s. **Always pass it explicitly** — the CLI does not default to 15s. If omitted, the flag is never sent to OpenRouter and the API applies its own default (effectively 5s). The recommended segment length is 15s; treat it as the standard working unit and pass `--duration 15` unless a shorter duration is justified (e.g. music beat alignment, pacing needs).
+`--duration` accepts any integer 5–15s. **Always pass it explicitly** — the CLI does not default to 15s. If omitted, the flag is never sent and the connector applies its own default of **10s**. The recommended segment length is 15s; treat it as the standard working unit and pass `--duration 15` unless a shorter duration is justified (e.g. music beat alignment, pacing needs).
 
 | | Single 15s | Stitched segments |
 |---|---------|----------|
@@ -140,7 +149,7 @@ More anchors = stronger consistency, but longer generation time (8–12 min with
 
 ## Multi-Segment Continuity
 
-For sequential segments on the default model (`x-ai/grok-imagine-video` / any OpenRouter model), use tail-frame → next `first_frame` when the next segment must open on an exact carried-over pose/composition/state, or when you need a clean visual handoff of gaze, props, or lighting. This is the only continuity method that works on these models — none of them accept a previous-segment video as input, confirmed by reading the actual connector code (not just undocumented).
+For sequential segments on any model reachable through the connector, use tail-frame → next `first_frame` when the next segment must open on an exact carried-over pose/composition/state, or when you need a clean visual handoff of gaze, props, or lighting. This is the only continuity method that works on these models — none of them accept a previous-segment video as input, confirmed by reading the actual connector code (not just undocumented).
 
 There is no second method: video-to-video continuation is not available on any model reachable through the connector, because OpenRouter's video API has no video-to-video mode. `ref_video` is a hard error rather than a silent no-op, so tail-frame → `first_frame` is the continuity method for segment handoffs.
 

@@ -81,9 +81,16 @@ silently dropped locally.
 
 **Caching.** Both tools key their cache on the *user's own wording*, so pass
 `--user-prompt "<what the user actually asked for>"` whenever `--prompt` is your
-expanded version of it — that is what lets a repeat request be served free
+expanded version of it — that is what lets a repeat request be served from cache
 instead of regenerating. Omitting `--model` on a video additionally lets the
 server check its cache under the other video models before generating.
+
+A cache hit returns the earlier asset in a fraction of the time, but **is still
+billed** — it saves latency and upstream provider cost, not your credits. Both
+cache tiers are also opt-in server-side (`ENABLE_IMAGE_GENERATION_CACHE`,
+`ENABLE_VIDEO_GENERATION_CACHE`, and the matching `..._SEMANTIC_CACHE` flags);
+where they are off, every repeat regenerates and `source` is never `exact-cache`
+or `semantic-cache`.
 
 ---
 
@@ -94,7 +101,7 @@ server check its cache under the other video models before generating.
 ```bash
 node ${CLAUDE_SKILL_DIR}/ironlabs-cli.mjs task generate \
   --prompt "..." --duration 15 --ratio 16:9 \
-  [--materials "<mat-id:role,...>"] [--model <model>] [--tags "project-x"]
+  [--materials "<mat-id>:first_frame"] [--model <model>] [--tags "project-x"]
 ```
 
 **Parameters:**
@@ -117,12 +124,16 @@ node ${CLAUDE_SKILL_DIR}/ironlabs-cli.mjs task generate \
   --prompt "..." --model google/gemini-3.1-flash-image-preview --ratio 16:9
 ```
 
-Images take `--quantity <1-4>` for a batch in one call. `--resolution` does not apply —
-image size is controlled by `--ratio`.
+Images take `--quantity <1-4>` for a batch in one call — every image is returned
+(`task result` prints them all) and **every image is billed**, so `--quantity 4`
+costs 4x a single render. `--resolution` does not apply — image size is controlled
+by `--ratio`.
 
-**Reusing a result instead of paying again:** there is no client-side seed. Repeat
-generations are deduplicated by the server's cache, which keys on the request and on
-`--user-prompt`, so pass the user's own wording to make a repeat ask hit it:
+**Reusing a result:** there is no client-side seed. Repeat generations are
+deduplicated by the server's cache, which keys on the request and on
+`--user-prompt`, so pass the user's own wording to make a repeat ask hit it.
+Note this returns the *same* image quickly rather than making it free — a cache
+hit is still billed:
 
 ```bash
 node ${CLAUDE_SKILL_DIR}/ironlabs-cli.mjs task generate \
@@ -139,8 +150,13 @@ First upload a file to get a material ID, then reference it by ID.
 
 | Role | `--materials` syntax | What it does |
 |------|---------------------|--------------|
-| Reference image | `<id>:ref_image` | Style/environment guidance |
+| Reference image | `<id>:ref_image` | Style/environment guidance (the default when no role is given; `reference_image` is an accepted alias) |
 | First frame | `<id>:first_frame` | Pin opening composition |
+
+Registered assets use `asset:<id>:<role>`; registered characters use the separate
+`--characters "<id>:ref_image"` flag. Uploads are stored locally and embedded as
+inline `data:` URIs — there is no hosting endpoint, so downscale large stills to
+keep generate calls fast.
 
 ```bash
 # Upload material first
@@ -151,13 +167,17 @@ node ${CLAUDE_SKILL_DIR}/ironlabs-cli.mjs task generate \
   --prompt "..." --duration 15 --ratio 16:9 \
   --materials "${MAT}:ref_image"
 
-# With multiple references
-MAT1=$(node ${CLAUDE_SKILL_DIR}/ironlabs-cli.mjs material upload char.jpg | jq -r '.material.id')
-MAT2=$(node ${CLAUDE_SKILL_DIR}/ironlabs-cli.mjs material upload scene.jpg | jq -r '.material.id')
+# Pin the opening frame instead (e.g. a tail frame carried over from the last shot)
 node ${CLAUDE_SKILL_DIR}/ironlabs-cli.mjs task generate \
   --prompt "..." --duration 15 --ratio 16:9 \
-  --materials "${MAT1}:ref_image,${MAT2}:ref_image"
+  --materials "${MAT}:first_frame"
 ```
+
+> **Video takes one still, not several.** `video_generate` has a single `image_url`
+> argument — passing two or more `ref_image` materials sends the first and warns
+> that the rest were ignored. To combine references (character + location, say),
+> compose them into one image with `image_generate` first, then pass that composite.
+> Image generation likewise takes a single reference.
 
 ---
 

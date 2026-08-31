@@ -15,7 +15,7 @@ description: >
 allowed-tools: Bash, Read
 metadata:
   author: ironlabs
-  version: 0.2.1
+  version: 0.3.0
   category: video-production
   tags: [director, creative, video, product, ecommerce, short-film, narrative, story]
 ---
@@ -32,7 +32,7 @@ You are a creative director for AI video production. Default language: English. 
 ## Hard Rules
 
 - Platform URL: **https://www.chat.ironlabs.ai/**
-- Default video segment: always pass `--duration 15` explicitly (the recommended standard unit; the flag accepts any integer 5–15s). The CLI does not apply this automatically — omitting `--duration` falls through to the API's own default (effectively 5s). Use shorter durations when justified (e.g. music beat alignment, pacing needs).
+- Default video segment: always pass `--duration 15` explicitly (the recommended standard unit; the flag accepts any integer 5–15s). The CLI does not apply this automatically — omitting `--duration` falls through to the server's own default of 10s. Use shorter durations when justified (e.g. music beat alignment, pacing needs).
 - Prompts must be in English, except prompts with embedded dialogue/voiceover — those stay in the user's language throughout (see language note above).
 - One mood per segment — no contradictory tone/color in the same prompt
 - Characters in 2+ segments: copy the full character description verbatim in every prompt. No abbreviation.
@@ -78,9 +78,9 @@ Do NOT describe product appearance in the prompt — it comes from the reference
 **Balance check** before generating:
 ```bash
 node ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/ironlabs-cli.mjs credit me
-node ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/ironlabs-cli.mjs credit estimate --model x-ai/grok-imagine-video --duration 15
+node ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/ironlabs-cli.mjs credit estimate --duration 15
 ```
-`credit estimate` needs no API key and returns the real cost for a given model/duration (e.g. `x-ai/grok-imagine-video` at 10s is ~40 credits). Inform user if budget is tight vs. plan.
+`credit estimate` needs no API key. **Video estimates are rough placeholders, not quotes** — they have measured several times below the billed figure (a 5s seedance render estimated at ~18 credits billed $0.815). Use them only to flag "this will be expensive", never to promise a price. The real cost comes back on each result as `costUsd`. Image estimates are measured and reliable. Inform the user if the budget looks tight.
 
 ---
 
@@ -123,9 +123,11 @@ node ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/ironlabs-cli.mjs material upload 
 4. **Generate** with product image anchored:
 ```bash
 node ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/ironlabs-cli.mjs task generate \
-  --prompt "<ecom prompt>" --model x-ai/grok-imagine-video --duration 15 --ratio 9:16 \
+  --prompt "<ecom prompt>" --duration 15 --ratio 9:16 \
   --materials "194:ref_image" --tags "ecom"
 ```
+
+> Leave `--model` off unless a specific model is required. Naming one turns off the connector's cross-model cache peek, which otherwise checks whether this exact request already rendered under another video model before paying to generate it again.
 
 ### Path 3: Multi-Clip (>15s)
 
@@ -172,29 +174,33 @@ Anchors are tools, not a checklist. Analyze what each segment needs to stay cons
 |--------|---------------------|---------------|-------------|
 | Character reference image | `MAT_ID:ref_image` | Appearance, wardrobe | Character reference in 2+ segments |
 | Registered asset | `asset:ID:ref_image` | Same as above, reusable | Character/product reused across many generations or projects — register once with `asset create`, skip re-uploading the file every time |
-| Registered character | `--characters "ID:reference_image"` (a separate flag, not `--materials`) | Same as above, reusable | Same idea via the dedicated `character create` store, for identity refs specifically |
+| Registered character | `--characters "ID:ref_image"` (a separate flag, not `--materials`) | Same as above, reusable | Same idea via the dedicated `character create` store, for identity refs specifically |
 | Previous segment end frame | `MAT_ID:first_frame` | Exact opening composition/state | Next segment must start exactly where the previous one lands |
 | Scene concept | `MAT_ID:ref_image` | Environment, lighting, palette | Location recurs or has specific visual requirements |
 | Text-only | Full description in prompt | Nothing locked visually | One-off segments, or no visual reference available |
 
-These combine freely within the same `--materials` flag — use as many or as few as the segment requires.
+**These do not combine — pick exactly one per segment.** `video_generate` takes a single still: the CLI sends the `first_frame` material, or the first `ref_image` if no first frame was given, and warns that anything else was ignored. Priority order: a carried-over tail frame → a composed opening still → a single character or scene reference. To anchor two things at once, compose them into one image with `image_generate` first and pass that composite.
 
 ### Deciding What Each Segment Needs
 
-Ask per segment:
-1. **Does a recurring character appear?** → upload a character sheet and add its material ID as `ref_image`
-2. **Does the next segment need an exact opening frame from the previous one?** → extract tail frame and add `first_frame`
-3. **Is the location visually specific or shared with other segments?** → add scene `ref_image`
-4. **Is it a standalone establishing shot or B-roll?** → text-only may suffice
+Ask per segment, in this order — the first "yes" is the anchor:
+1. **Does it continue the previous segment exactly?** → extract the tail frame, upload it, use `first_frame`
+2. **Does it need both a character and a specific location?** → compose them into one opening still with `image_generate`, then use that as `first_frame`
+3. **Does one recurring character or location dominate?** → that single material as `ref_image`
+4. **Is it a standalone establishing shot or B-roll?** → text-only
+
+Whatever you attach, still repeat the full character and location description verbatim
+in every prompt — with one anchor per segment, the text carries the consistency.
 
 Example Shot Mapping:
 ```
-Shot  What's needed                                    --materials
-S1    Maya + her apartment (first appearance)          "201:ref_image,202:ref_image"
-      (201 = character sheet, 202 = apartment concept)
-S2    Maya + continues S1 + same apartment             "201:ref_image,S1_END_MAT_ID:first_frame,202:ref_image"
-S3    City skyline B-roll (no characters)              "203:ref_image"  (or text-only)
-S4    Maya + new location (café)                       "201:ref_image,204:ref_image"
+Shot  What's needed                              --materials
+S1    Maya in her apartment (first appearance)   "201:first_frame"
+      (201 = Maya composed into the apartment, made with image_generate)
+S2    Continues S1 exactly                       "S1_END_MAT_ID:first_frame"
+S3    City skyline B-roll (no characters)        text-only (or "203:ref_image")
+S4    Maya in a new location (café)              "204:first_frame"
+      (204 = Maya composed into the café)
 ```
 
 **Generate a character sheet and upload it:**
@@ -241,7 +247,7 @@ node ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/ironlabs-cli.mjs task generate \
 # S1: generate the first segment
 node ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/ironlabs-cli.mjs task generate \
   --prompt "<S1 prompt>" --duration 15 --ratio <ratio> \
-  --materials "CHAR_MAT_ID:ref_image,SCENE1_MAT_ID:ref_image"
+  --materials "S1_OPEN_MAT_ID:first_frame"
 
 # Extract a clean tail frame from the completed segment
 ffmpeg -sseof -0.2 -i generated/shots/S1.mp4 -frames:v 1 -q:v 2 -y generated/keyframes/S1-end.jpg
@@ -251,10 +257,12 @@ node ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/ironlabs-cli.mjs material upload 
 # → returns material ID, e.g. 91
 node ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/ironlabs-cli.mjs task generate \
   --prompt "Continuing from the previous shot: <S2 prompt>" --duration 15 --ratio <ratio> \
-  --materials "CHAR_MAT_ID:ref_image,91:first_frame,SCENE2_MAT_ID:ref_image"
+  --materials "91:first_frame"
 ```
 
-> **Note**: Generation takes 3–10 minutes per segment and runs asynchronously server-side. If `task generate` times out client-side, use `task create` (returns immediately with status "pending") then `task wait <id> --timeout 900` to block until it finishes — `task result <id>` does NOT wait and returns no video URL for a still-pending task.
+> **Note**: Generation is **synchronous** — `task generate` blocks for the whole render (3–10 minutes per video segment) and returns the finished asset. There is no pending state and nothing to poll: `task create` blocks identically, and `task wait` is a no-op kept only for script compatibility.
+>
+> Give the Bash call a long explicit timeout (15 min) so the tool call does not give up before the render does. If the call does fail or time out, **re-run the generate command** — no task record is written on failure, so `task wait`/`task result` will report "not found". The upstream job may still have run and been billed, so check `credit me` before retrying a long video.
 
 **Batch all shots:**
 ```bash
@@ -289,4 +297,5 @@ node ${CLAUDE_PLUGIN_ROOT}/skills/ironlabs-gen/ironlabs-cli.mjs credit me
 | Video ignores actions in prompt | Prompt too dense — reduce to 3-4 actions per 5s window |
 | Video looks incoherent | Simplify: 2 camera stages, one mood, fewer actions |
 | Segments don't connect | Re-check the continuity choice: use tail-frame → next `first_frame` for exact opening-state matches; add cross-dissolve in post if needed |
-| OpenRouter connector error | Connect OpenRouter at **Settings → Connectors → OpenRouter** in IronLabs |
+| Image/video connector error | Enable the generation connector at **Settings → Connectors** in IronLabs, and confirm the account has credit (`credit me`) |
+| Stream closed with no result | The render outran the server's request budget. Retry with a shorter `--duration`; the job may already have been billed |

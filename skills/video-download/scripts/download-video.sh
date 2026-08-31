@@ -28,7 +28,8 @@ extract_video_id() {
     return
   fi
 
-  # TikTok: numeric ID (15+ digits)
+  # TikTok: numeric ID (15+ digits). Short links (vm.tiktok.com/ZMxxxx) carry
+  # no numeric ID, so key them on their slug instead of falling through.
   if [[ "$url" =~ tiktok\.com ]]; then
     local tk_id
     tk_id=$(echo "$url" | grep -oE '[0-9]{15,}' | head -1)
@@ -36,12 +37,24 @@ extract_video_id() {
       echo "tk-${tk_id}"
       return
     fi
+    local tk_slug
+    tk_slug=$(echo "$url" | grep -oE 'tiktok\.com/[A-Za-z0-9]+' | head -1 | cut -d/ -f2)
+    if [[ -n "$tk_slug" ]]; then
+      echo "tk-${tk_slug}"
+      return
+    fi
   fi
 
-  # Fallback: base64url-encoded URL, first 16 chars
-  local b64
-  b64=$(echo -n "$url" | base64 | tr '+/' '-_' | tr -d '=' | head -c 16)
-  echo "vid-${b64}"
+  # Fallback: md5 of the full URL, first 16 hex chars.
+  # Must hash the whole URL — truncating an encoding of it collides, since
+  # base64's first 16 chars only cover the first 12 bytes ("https://www.").
+  local hash
+  if command -v md5 >/dev/null 2>&1; then
+    hash=$(printf '%s' "$url" | md5 -q | head -c 16)
+  else
+    hash=$(printf '%s' "$url" | md5sum | cut -d' ' -f1 | head -c 16)
+  fi
+  echo "vid-${hash}"
 }
 
 VIDEO_ID=$(extract_video_id "$URL")
