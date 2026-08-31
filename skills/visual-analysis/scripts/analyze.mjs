@@ -292,6 +292,10 @@ async function callCompletions(messages, model) {
   let result = "";
   const decoder = new TextDecoder();
   let buffer = "";
+  // The stream reports why it failed in a structured error event, then closes
+  // with a bare "[Error]" sentinel carrying no detail. Hold onto the message so
+  // the sentinel can report the real cause instead of just "[Error]".
+  let lastError = null;
 
   for await (const chunk of resp.body) {
     buffer += decoder.decode(chunk, { stream: true });
@@ -302,14 +306,25 @@ async function callCompletions(messages, model) {
       if (!line.startsWith("data: ")) continue;
       const raw = line.slice(6).trim();
       if (raw === "[DONE]") return result;
-      if (raw.startsWith("[Error]")) throw new Error(`Stream error: ${raw}`);
+      if (raw.startsWith("[Error]")) {
+        throw new Error(`Stream error: ${lastError ?? raw}`);
+      }
+      // Parsed outside the try so a throw below isn't swallowed as a parse failure.
+      let event;
       try {
-        const event = JSON.parse(raw);
-        if (event.type === "text" && event.text) {
-          result += event.text;
-        }
+        event = JSON.parse(raw);
       } catch {
-        // ignore unparseable lines
+        continue; // ignore unparseable lines
+      }
+      if (event.type === "error") {
+        const detail = event.message || "unknown error";
+        // A non-fatal error names one model that failed; another may still answer.
+        if (event.fatal) throw new Error(detail);
+        lastError = detail;
+        continue;
+      }
+      if (event.type === "text" && event.text) {
+        result += event.text;
       }
     }
   }

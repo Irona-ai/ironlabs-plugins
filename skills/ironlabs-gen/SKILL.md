@@ -81,9 +81,16 @@ silently dropped locally.
 
 **Caching.** Both tools key their cache on the *user's own wording*, so pass
 `--user-prompt "<what the user actually asked for>"` whenever `--prompt` is your
-expanded version of it — that is what lets a repeat request be served free
+expanded version of it — that is what lets a repeat request be served from cache
 instead of regenerating. Omitting `--model` on a video additionally lets the
 server check its cache under the other video models before generating.
+
+A cache hit returns the earlier asset in a fraction of the time, but **is still
+billed** — it saves latency and upstream provider cost, not your credits. Both
+cache tiers are also opt-in server-side (`ENABLE_IMAGE_GENERATION_CACHE`,
+`ENABLE_VIDEO_GENERATION_CACHE`, and the matching `..._SEMANTIC_CACHE` flags);
+where they are off, every repeat regenerates and `source` is never `exact-cache`
+or `semantic-cache`.
 
 ---
 
@@ -120,9 +127,11 @@ node ${CLAUDE_SKILL_DIR}/ironlabs-cli.mjs task generate \
 Images take `--quantity <1-4>` for a batch in one call. `--resolution` does not apply —
 image size is controlled by `--ratio`.
 
-**Reusing a result instead of paying again:** there is no client-side seed. Repeat
-generations are deduplicated by the server's cache, which keys on the request and on
-`--user-prompt`, so pass the user's own wording to make a repeat ask hit it:
+**Reusing a result:** there is no client-side seed. Repeat generations are
+deduplicated by the server's cache, which keys on the request and on
+`--user-prompt`, so pass the user's own wording to make a repeat ask hit it.
+Note this returns the *same* image quickly rather than making it free — a cache
+hit is still billed:
 
 ```bash
 node ${CLAUDE_SKILL_DIR}/ironlabs-cli.mjs task generate \

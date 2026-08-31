@@ -198,6 +198,13 @@ function listLocalMaterials(params = {}) {
 // gemini-3.1-flash-image-preview (0.060) and grok-imagine-image-quality (0.050)
 // are measured against returned cost_usd; the rest are rough placeholders, so
 // treat "credit estimate" as indicative only.
+//
+// The video perSecond figures are known to understate badly: a measured 5s
+// bytedance/seedance-2.0 render billed $0.815 ($0.163/s), ~4.6x the 0.035 here.
+// They are left as-is deliberately — the real price comes back from MuAPI per
+// job (cost.amount_usd) and varies with resolution and tier, so no local table
+// can be authoritative. Video estimates therefore carry an explicit warning
+// rather than a fabricated-precision number.
 const OR_MODELS = {
   "bytedance/seedance-2.0":    { type: "video", perSecond: 0.035 },
   "x-ai/grok-imagine-video":   { type: "video", perSecond: 0.040 },
@@ -386,7 +393,14 @@ var IronlabsClient = class {
     const usd = pricing.type === "video"
       ? (parseInt(params.duration) || 10) * pricing.perSecond // 10s matches the connector's own duration default
       : pricing.flat;
-    return { credits: Math.ceil(usd * 100), usd: parseFloat(usd.toFixed(4)), model };
+    const estimate = { credits: Math.ceil(usd * 100), usd: parseFloat(usd.toFixed(4)), model };
+    // Video rates are unmeasured placeholders that have been observed to
+    // understate the billed figure several-fold — say so rather than let the
+    // number read as a quote.
+    if (pricing.type === "video") {
+      estimate.note = "Indicative only — video rates are unverified placeholders and have measured several times low. Actual cost is whatever the server returns as costUsd.";
+    }
+    return estimate;
   }
   // ---- Task ----
   isImageModel(model) {
@@ -448,7 +462,7 @@ var IronlabsClient = class {
       if (params.resolution) {
         console.error(`Note: --resolution has no effect on image generation — image size is controlled by --ratio. Ignoring "${params.resolution}".`);
       }
-      console.log(`Generating image via the IronLabs image connector (${effectiveModel})...`);
+      console.error(`Generating image via the IronLabs image connector (${effectiveModel})...`);
       const orResult = await this.mcpCall("image_generate", orArgs);
       const imageUrl = orResult.images?.[0] ?? null;
       if (!imageUrl) throw new ApiError(500, orResult, "The image connector did not return an image");
@@ -506,7 +520,7 @@ var IronlabsClient = class {
         }
         orArgs.resolution = resolved;
       }
-      console.log(`Generating video via the IronLabs video connector (${effectiveModel})... this call blocks until the render finishes.`);
+      console.error(`Generating video via the IronLabs video connector (${effectiveModel})... this call blocks until the render finishes.`);
       const orResult = await this.mcpCall("video_generate", orArgs);
       const videoUrl = orResult.url ?? null;
       if (!videoUrl) throw new ApiError(500, orResult, "The video connector did not return a video URL");
@@ -561,8 +575,13 @@ var IronlabsClient = class {
     const mimeType = mimeTypeFor(filename, type);
     const b64 = Buffer.from(file).toString("base64");
 
-    // Try CDN upload; fall back to local base64 if unavailable
+    // Try CDN upload; fall back to an inline data: URI if unavailable. The
+    // fallback is serviceable — the connector stages inline references into R2
+    // before handing them to MuAPI — but it ships the whole file on every
+    // generate call, so a persistent failure here is worth surfacing rather
+    // than swallowing.
     let url = null;
+    let uploadIssue = null;
     if (this.apiKey) {
       try {
         const resp = await fetch(`${this.baseUrl}/upload`, {
@@ -573,10 +592,16 @@ var IronlabsClient = class {
         if (resp.ok) {
           const json = await resp.json();
           url = json.data?.url ?? null;
+          if (!url) uploadIssue = "upload succeeded but returned no URL";
+        } else {
+          uploadIssue = `HTTP ${resp.status}`;
         }
-      } catch {
-        // fall through to local storage
+      } catch (e) {
+        uploadIssue = e?.message || String(e);
       }
+    }
+    if (uploadIssue) {
+      console.error(`Note: could not host ${filename} at ${this.baseUrl}/upload (${uploadIssue}) — embedding it inline instead. Generation still works; large files will make each generate call slower.`);
     }
 
     const entry = url
@@ -1067,12 +1092,12 @@ async function materialUpload(client, positional, flags) {
   const type = flags.type || (isVideoFile(filePath) ? "video" : "image");
   const buffer = readFileSync(filePath);
   const filename = basename(filePath);
-  console.log(`Uploading ${filename} (${type}, ${(buffer.byteLength / 1024).toFixed(1)}KB)...`);
+  console.error(`Uploading ${filename} (${type}, ${(buffer.byteLength / 1024).toFixed(1)}KB)...`);
   const data = await client.uploadMaterial(buffer, filename, type);
   if (data.action === "exists") {
-    console.log(`Material already exists: #${data.material.id}`);
+    console.error(`Material already exists: #${data.material.id}`);
   } else {
-    console.log(`Material uploaded: #${data.material.id}`);
+    console.error(`Material uploaded: #${data.material.id}`);
   }
   json(data);
 }
@@ -1099,9 +1124,9 @@ async function characterCreate(client, positional, flags) {
   }
   const buffer = readFileSync(filePath);
   const filename = basename(filePath);
-  console.log(`Creating character from ${filename} (${(buffer.byteLength / 1024).toFixed(1)}KB)...`);
+  console.error(`Creating character from ${filename} (${(buffer.byteLength / 1024).toFixed(1)}KB)...`);
   const data = await client.importCharacters(buffer, filename);
-  console.log(`Character #${data.character.id} created — use as: --characters "${data.character.id}:reference_image"`);
+  console.error(`Character #${data.character.id} created — use as: --characters "${data.character.id}:reference_image"`);
   json(data);
 }
 async function characterGrant(client, positional) {
@@ -1117,9 +1142,9 @@ async function assetCreate(client, positional, flags) {
   const type = flags.type || (isVideoFile(filePath) ? "video" : "image");
   const buffer = readFileSync(filePath);
   const filename = basename(filePath);
-  console.log(`Creating asset from ${filename} (${type}, ${(buffer.byteLength / 1024).toFixed(1)}KB)...`);
+  console.error(`Creating asset from ${filename} (${type}, ${(buffer.byteLength / 1024).toFixed(1)}KB)...`);
   const data = await client.createAsset(buffer, filename, type);
-  console.log(`Asset #${data.asset.id} created — use as: --materials "asset:${data.asset.id}:ref_image"`);
+  console.error(`Asset #${data.asset.id} created — use as: --materials "asset:${data.asset.id}:ref_image"`);
   json(data);
 }
 async function assetRegister(client, positional, flags) {
@@ -1249,7 +1274,7 @@ async function main() {
   const localOnlyDomains = new Set(["character", "asset"]);
   const client = createClient(baseUrlOverride, localOnlyDomains.has(domain));
   if (baseUrlOverride) {
-    console.log(`ℹ️  Using API: ${baseUrlOverride}`);
+    console.error(`ℹ️  Using API: ${baseUrlOverride}`);
   }
   try {
     switch (domain) {
