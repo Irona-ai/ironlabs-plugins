@@ -138,36 +138,53 @@ function listLocalMaterials(params = {}) {
   } catch { return []; }
 }
 
-// Real OpenRouter model IDs — no alias layer, mirroring irona-chat's
-// OR_VIDEO_MODELS (backend/services/videoGeneration.service.ts). Keep these in
-// sync with that list.
+// Real model IDs, mirroring irona-chat's OR_VIDEO_MODELS
+// (backend/services/videoGeneration.service.ts) and the model list documented on
+// the image_generate / video_generate connector tools. Keep in sync with those.
 //
-// Per-model capability rules (durations, aspect ratios, last_frame support,
-// input_references caps) are deliberately NOT duplicated here. The openrouter
-// connector owns them server-side via MODEL_VIDEO_CONFIGS / capInputReferences,
-// so this CLI passes arguments straight through and lets the connector
-// validate and cap — one source of truth, no client/server drift.
+// Per-model capability rules (durations, aspect ratios, MuAPI-vs-OpenRouter
+// routing) are deliberately NOT duplicated here — the connector owns them
+// server-side, so this CLI passes arguments through and lets the server decide.
 const OR_VIDEO_MODELS = [
+  "bytedance/seedance-2.0",
   "x-ai/grok-imagine-video",
   "kwaivgi/kling-v3.0-pro",
-  "bytedance/seedance-2.0",
   "alibaba/happyhorse-1.1",
 ];
 const OR_IMAGE_MODELS = [
   "google/gemini-3.1-flash-image-preview",
+  "google/gemini-3.1-flash-lite-image",
+  "google/gemini-3-pro-image-preview",
+  "google/gemini-2.5-flash-image",
+  "x-ai/grok-imagine-image-quality",
+  "bytedance-seed/seedream-4.5",
 ];
-// Matches irona-chat's DEFAULT_MODEL in videoGeneration.service.ts.
-const DEFAULT_VIDEO_MODEL = "x-ai/grok-imagine-video";
+// Matches DEFAULT_MODEL in irona-chat's agentVideoGeneration.service.ts /
+// agentImageGeneration.service.ts — the defaults the connector itself applies.
+const DEFAULT_VIDEO_MODEL = "bytedance/seedance-2.0";
 const DEFAULT_IMAGE_MODEL = "google/gemini-3.1-flash-image-preview";
 
-// OpenRouter pricing estimates (USD per unit), keyed on the same real IDs.
-// Display-only, for "credit estimate" — the server does the real billing.
+// Upper bound on a single generate call. Generous enough for a slow video
+// render, but finite: fetch() has no timeout of its own, so without this a
+// stalled connection would hang the CLI indefinitely.
+const MCP_CALL_TIMEOUT_MS = 900_000;
+
+// Pricing estimates (USD per unit), keyed on the same real IDs. Display-only,
+// for "credit estimate" — the server reports the real figure as cost_usd, and
+// that is the number that gets billed. gemini-3.1-flash-image-preview (0.060)
+// and grok-imagine-image-quality (0.050) are measured against returned cost_usd;
+// the rest are rough placeholders, so treat "credit estimate" as indicative only.
 const OR_PRICING = {
+  "bytedance/seedance-2.0":    { type: "video", perSecond: 0.035 },
   "x-ai/grok-imagine-video":   { type: "video", perSecond: 0.040 },
   "kwaivgi/kling-v3.0-pro":    { type: "video", perSecond: 0.045 },
-  "bytedance/seedance-2.0":    { type: "video", perSecond: 0.035 },
   "alibaba/happyhorse-1.1":    { type: "video", perSecond: 0.035 },
-  "google/gemini-3.1-flash-image-preview": { type: "image", flat: 0.020 },
+  "google/gemini-3.1-flash-image-preview": { type: "image", flat: 0.060 },
+  "google/gemini-3.1-flash-lite-image":    { type: "image", flat: 0.030 },
+  "google/gemini-3-pro-image-preview":     { type: "image", flat: 0.120 },
+  "google/gemini-2.5-flash-image":         { type: "image", flat: 0.040 },
+  "x-ai/grok-imagine-image-quality":       { type: "image", flat: 0.050 },
+  "bytedance-seed/seedream-4.5":           { type: "image", flat: 0.050 },
 };
 
 // Slug-tolerant resolver, mirroring irona-chat's resolveToORModel(): accepts a
@@ -204,20 +221,36 @@ var IronlabsClient = class {
     if (!resp.ok) throw new ApiError(resp.status, data, data.error || data.message);
     return data;
   }
-  // ---- Sandbox token ----
-  async issueSandboxToken(scope) {
-    const data = await this.request("POST", "/ext/token", { scope, ttlSeconds: 3600 });
-    return data.data?.token || data.token;
-  }
-  // ---- MCP call (routes through IronLabs backend → external connector) ----
-  async mcpCall(connector, toolName, toolArguments) {
-    const token = await this.issueSandboxToken([connector]);
-    const url = `${this.baseUrl}/mcp/${connector}`;
-    const resp = await fetch(url, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", Accept: "application/json, text/event-stream" },
-      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: toolName, arguments: toolArguments } }),
-    });
+  // ---- MCP call (IronLabs "generate" toolset: image_generate / video_generate) ----
+  // Hits the same external MCP endpoint irona-chat exposes for its image/video
+  // connectors (backend/constants/externalMcpToolsets.constants.ts), so a
+  // generation from here runs the identical server-side chain the chat app runs:
+  // exact cache → semantic cache → MuAPI → OpenRouter fallback.
+  //
+  // Authenticates with IRONLABS_API_KEY directly. The older /ext/token sandbox
+  // token is deliberately not used: its scope allowlist has no "image"/"video"
+  // entry, so a token for these connectors can't be minted at all.
+  async mcpCall(toolName, toolArguments, timeoutMs = MCP_CALL_TIMEOUT_MS) {
+    const url = `${this.baseUrl}/mcp/ext/generate`;
+    let resp;
+    try {
+      resp = await fetch(url, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${this.apiKey}`, "Content-Type": "application/json", Accept: "application/json, text/event-stream" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: toolName, arguments: toolArguments } }),
+        // These calls block for the whole render and fetch() has no timeout of
+        // its own, so without this a stalled connection hangs the CLI forever.
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+    } catch (e) {
+      if (e?.name === "TimeoutError" || e?.name === "AbortError") {
+        throw new ApiError(504, {}, `${toolName} did not respond within ${Math.round(timeoutMs / 1000)}s — giving up. The job may still be running and billed upstream. Retry, or use a shorter --duration.`);
+      }
+      // A generation that outlives the server's request budget shows up here as
+      // a socket abort mid-stream, not as an HTTP status. Report it as the
+      // timeout it is instead of dumping a raw undici stack trace.
+      throw new ApiError(504, { cause: String(e?.cause?.message || e?.message || e) }, `The connection to ${toolName} dropped before a result arrived — the server closed the stream mid-generation, which usually means the render outran the request budget. The job may still have run and been billed upstream. Retry, or use a shorter --duration.`);
+    }
     if (!resp.ok) {
       const err = await resp.json().catch(() => ({}));
       if (resp.status === 402) {
@@ -231,13 +264,28 @@ var IronlabsClient = class {
     }
     const contentType = resp.headers.get("content-type") ?? "";
     let result;
+    // The response headers land as soon as the stream opens, long before the
+    // generation finishes, so a render that outruns the server's request budget
+    // surfaces here — either as a torn body read or as a 200 with no event at
+    // all. Both mean the same thing; report it as the timeout it is rather than
+    // letting a raw undici stack escape.
+    const streamCutError = () => new ApiError(504, {}, `${toolName} returned no result — the server closed the stream mid-generation, which usually means the render outran its request budget. The job may still have run and been billed upstream. Retry, or use a shorter --duration.`);
     if (contentType.includes("text/event-stream")) {
-      const text = await resp.text();
+      let text;
+      try {
+        text = await resp.text();
+      } catch {
+        throw streamCutError();
+      }
       const dataLine = text.split("\n").find(l => l.startsWith("data:"));
-      if (!dataLine) throw new ApiError(500, {}, "No data in SSE response");
+      if (!dataLine) throw streamCutError();
       result = JSON.parse(dataLine.slice(5).trim());
     } else {
-      result = await resp.json();
+      try {
+        result = await resp.json();
+      } catch {
+        throw streamCutError();
+      }
     }
     if (result.error) throw new ApiError(400, result.error, result.error.message);
     const content = result.result?.content;
@@ -297,7 +345,7 @@ var IronlabsClient = class {
     const pricing = OR_PRICING[model];
     if (!pricing) return { credits: 0, note: `No pricing data for ${model || "unknown model"}` };
     const usd = pricing.type === "video"
-      ? (parseInt(params.duration) || 5) * pricing.perSecond
+      ? (parseInt(params.duration) || 10) * pricing.perSecond // 10s matches the connector's own duration default
       : pricing.flat;
     return { credits: Math.ceil(usd * 100), usd: parseFloat(usd.toFixed(4)), model };
   }
@@ -318,7 +366,7 @@ var IronlabsClient = class {
     if (model.includes("/")) return model;
     // A bare slug we don't recognize is almost always a typo — failing loudly
     // beats silently generating (and billing) against the default model.
-    throw new ApiError(400, {}, `Unknown model "${model}". Pass a full OpenRouter model id — video: ${OR_VIDEO_MODELS.join(", ")}; image: ${OR_IMAGE_MODELS.join(", ")}.`);
+    throw new ApiError(400, {}, `Unknown model "${model}". Pass a full provider/model id — video: ${OR_VIDEO_MODELS.join(", ")}; image: ${OR_IMAGE_MODELS.join(", ")}.`);
   }
   async createTask(params) {
     const isImage = this.isImageModel(params.model);
@@ -333,84 +381,75 @@ var IronlabsClient = class {
       }
     }
     const taskId = nextId();
-    const model = this.mapModel(params.model, isImage);
+    // Only send `model` when the caller actually chose one. Omitting it lets the
+    // connector apply its own default AND run its cross-model cache peek, which
+    // it skips entirely whenever a model is supplied — pinning the default here
+    // would silently cost every user that cache tier.
+    const model = params.model ? this.mapModel(params.model, isImage) : undefined;
+    const effectiveModel = model ?? (isImage ? DEFAULT_IMAGE_MODEL : DEFAULT_VIDEO_MODEL);
     const { credits: estimatedCredit } = await this.estimateCost({ model: params.model, duration: params.duration });
     if (isImage) {
-      // image_generate via openrouter connector — returns a chat-completion with image modality
-      const orArgs = {
-        prompt: params.prompt,
-        model,
-      };
-      // The connector's image_generate takes size as a "1536x1024" or "16:9"
-      // hint — pass the ratio through rather than pre-converting to pixels.
-      if (params.ratio) orArgs.size = params.ratio;
-      // Deterministic seed: the connector keys its generation cache on the exact
-      // tool arguments, so an unset seed makes every repeat request a cache miss
-      // and a fresh (differently-priced) generation. Pass --seed to get the same
-      // image back for free on a re-run.
-      if (params.seed !== undefined) orArgs.seed = params.seed;
+      // image_generate — synchronous; returns { images: [url], source, model, cost_usd }
+      const orArgs = { prompt: params.prompt };
+      if (model) orArgs.model = model;
+      // The cache is keyed on the user's own wording, not on an expanded prompt,
+      // so passing it through is what lets this share cache hits with the chat app.
+      if (params.userPrompt) orArgs.user_prompt = params.userPrompt;
+      if (params.ratio) orArgs.aspect_ratio = params.ratio;
+      if (params.quantity) orArgs.quantity = params.quantity;
       // image-to-image: pass a reference image if provided
       const imageRef = params.materials?.find(m => m.role === "ref_image" || m.role === "first_frame");
       if (imageRef?._dataUri) orArgs.image_url = imageRef._dataUri;
       if (params.resolution) {
         console.error(`Note: --resolution has no effect on image generation — image size is controlled by --ratio. Ignoring "${params.resolution}".`);
       }
-      console.log(`Generating image via OpenRouter connector (${model})...`);
-      const orResult = await this.mcpCall("openrouter", "image_generate", orArgs);
-      // Extract image URL from the chat-completion response (modalities:
-      // image+text). Handles both shapes irona-chat handles: OpenRouter puts
-      // generated images in message.images[], while some responses carry them
-      // as an image_url part inside message.content[].
-      const choice = orResult.choices?.[0]?.message;
-      let imageUrl = null;
-      const img = choice?.images?.[0];
-      if (img) imageUrl = img.image_url?.url ?? img.url ?? null;
-      if (!imageUrl && Array.isArray(choice?.content)) {
-        const imgPart = choice.content.find(p => p.type === "image_url");
-        imageUrl = imgPart?.image_url?.url ?? null;
-      }
-      if (!imageUrl) throw new ApiError(500, orResult, "OpenRouter connector did not return an image");
+      console.log(`Generating image via the IronLabs image connector (${effectiveModel})...`);
+      const orResult = await this.mcpCall("image_generate", orArgs);
+      const imageUrl = orResult.images?.[0] ?? null;
+      if (!imageUrl) throw new ApiError(500, orResult, "The image connector did not return an image");
       await refreshBalanceCache(this);
       const stored = {
         taskId, status: "completed",
-        model, prompt: params.prompt,
+        model: orResult.model || effectiveModel, prompt: params.prompt,
         tags: params.tags || [],
-        videoUrl: null, imageUrl, orResult,
+        videoUrl: null, imageUrl,
+        source: orResult.source, costUsd: orResult.cost_usd,
+        orResult,
       };
       writeTask(taskId, stored);
+      console.error(`Done — served from ${orResult.source} ($${orResult.cost_usd}).`);
       return { task: { id: taskId, status: "completed", estimatedCredit } };
     } else {
-      // video_submit via openrouter connector — async, returns { id, polling_url, status }
+      // video_generate — synchronous; returns { url, source, model, cost_usd }.
       // image_url is optional: omit it for pure text-to-video.
       const firstFrame = params.materials?.find(m => m.role === "first_frame");
       const lastFrame  = params.materials?.find(m => m.role === "last_frame");
       const refImages  = params.materials?.filter(m => m.role === "ref_image") || [];
       const refVideo   = params.materials?.find(m => m.role === "ref_video");
-      const orArgs = {
-        prompt: params.prompt,
-        model,
-      };
+      const orArgs = { prompt: params.prompt };
+      if (model) orArgs.model = model;
+      if (params.userPrompt) orArgs.user_prompt = params.userPrompt;
       if (firstFrame?._dataUri) {
         orArgs.image_url = firstFrame._dataUri;
       } else if (refImages[0]?._dataUri) {
-        // No explicit first_frame: fall back to the first ref_image as image_url,
-        // preserving the previously-working single-reference behavior even if
-        // reference_image_urls below is ignored by the connector.
+        // No explicit first_frame: use the first ref_image as the hero still.
         orArgs.image_url = refImages[0]._dataUri;
       }
-      if (lastFrame?._dataUri) orArgs.last_image_url = lastFrame._dataUri;
-      if (refImages.length) {
-        // Passed through unconditionally. The connector's video_submit knows
-        // each model's supportsInputReferences / maxInputReferences and caps
-        // (or drops) the list itself via capInputReferences — deciding that
-        // here would just re-create the client/server drift this port removes.
-        orArgs.reference_image_urls = refImages.map(m => m._dataUri).filter(Boolean);
+      // The connector's video_generate takes exactly one still (image_url, used as
+      // the first frame). There is no multi-reference or last-frame field, so warn
+      // instead of silently dropping material the caller attached.
+      if (refImages.length > 1) {
+        console.error(`Note: the video connector accepts a single reference still — only the first of your ${refImages.length} ref_image materials is used. @Image2/@Image3 prompt tokens will not bind.`);
+      }
+      if (lastFrame) {
+        console.error(`Note: the video connector has no last-frame input — the "last_frame" material is ignored.`);
       }
       if (refVideo) {
         throw new ApiError(400, {}, `ref_video is not supported — the video connector has no video-input field on any model. For continuity, extract a tail frame with ffmpeg and pass it as --materials "ID:first_frame" instead.`);
       }
       if (params.duration) orArgs.duration = parseInt(params.duration);
       if (params.ratio)    orArgs.aspect_ratio = params.ratio;
+      if (params.audio !== undefined) orArgs.audio = params.audio;
       if (params.resolution) {
         // Video models top out at 1080p — "4k" is accepted for convenience but downgraded.
         const resMap = { "1k": "720p", "2k": "1080p", "4k": "1080p" };
@@ -420,20 +459,22 @@ var IronlabsClient = class {
         }
         orArgs.resolution = resolved;
       }
-      console.log(`Submitting video via OpenRouter connector (${model})...`);
-      const submitResult = await this.mcpCall("openrouter", "video_submit", orArgs);
-      const generationId = submitResult.id;
-      if (!generationId) throw new ApiError(500, submitResult, "OpenRouter connector did not return a generation id");
+      console.log(`Generating video via the IronLabs video connector (${effectiveModel})... this call blocks until the render finishes.`);
+      const orResult = await this.mcpCall("video_generate", orArgs);
+      const videoUrl = orResult.url ?? null;
+      if (!videoUrl) throw new ApiError(500, orResult, "The video connector did not return a video URL");
       await refreshBalanceCache(this);
       const stored = {
-        taskId, status: "pending",
-        model, prompt: params.prompt,
+        taskId, status: "completed",
+        model: orResult.model || effectiveModel, prompt: params.prompt,
         tags: params.tags || [],
-        videoUrl: null, imageUrl: null,
-        _openrouterId: generationId,
+        videoUrl, imageUrl: null,
+        source: orResult.source, costUsd: orResult.cost_usd,
+        orResult,
       };
       writeTask(taskId, stored);
-      return { task: { id: taskId, status: "pending", estimatedCredit } };
+      console.error(`Done — served from ${orResult.source} ($${orResult.cost_usd}).`);
+      return { task: { id: taskId, status: "completed", estimatedCredit } };
     }
   }
   async listTasks(params = {}) {
@@ -456,32 +497,16 @@ var IronlabsClient = class {
     return {};
   }
   async listTags() { return { tags: [] }; }
-  async waitForTask(id, maxWaitMs = 600_000) {
+  // Both connector tools are synchronous — "generate" only returns once the
+  // render is finished — so there is nothing left to poll. This stays as a
+  // no-op success purely so existing "generate && wait" scripts keep working.
+  async waitForTask(id) {
     const result = readTask(id);
     if (!result) throw new ApiError(404, {}, `Task #${id} not found`);
-    if (result.status === "completed") return result;
-    // Video task: poll via openrouter connector until terminal
-    const generationId = result._openrouterId;
-    if (!generationId) throw new ApiError(500, {}, `Task #${id} has no generation ID to poll`);
-    const start = Date.now();
-    while (Date.now() - start < maxWaitMs) {
-      const remaining = maxWaitMs - (Date.now() - start);
-      await new Promise(r => setTimeout(r, Math.min(10_000, remaining))); // poll every 10s, capped by remaining timeout
-      const poll = await this.mcpCall("openrouter", "video_status", { id: generationId });
-      process.stderr.write(`  Status: ${poll.status || "unknown"}... (${Math.round((Date.now() - start) / 1000)}s elapsed)\n`);
-      if (poll.status === "completed") {
-        result.status = "completed";
-        result.videoUrl = poll.unsigned_urls?.[0] || null;
-        result.orResult = poll;
-        writeTask(id, result);
-        await refreshBalanceCache(this);
-        return result;
-      }
-      if (poll.status === "failed") {
-        throw new ApiError(500, poll, `Video generation failed: ${poll.error || "unknown error"}`);
-      }
+    if (result.status !== "completed") {
+      throw new ApiError(500, {}, `Task #${id} is "${result.status}" — generation is synchronous now, so a non-completed task means the generate call itself failed. Re-run the generate command.`);
     }
-    throw new ApiError(408, {}, `Video generation timed out after ${maxWaitMs / 1000}s`);
+    return result;
   }
   // ---- Material ----
   async uploadMaterial(file, filename, type = "image") {
@@ -687,10 +712,9 @@ Global Flags:
 
 Run "ironlabs <domain> help" for domain-specific commands.
 
-Note: generation routes through the IronLabs OpenRouter connector — only IRONLABS_API_KEY needed.
-      Image tasks complete synchronously: task create/result already have the final image.
-      Video tasks are async: task create returns immediately with status "pending" — use
-      task wait <id> (or task generate, which is create+wait in one step) to block until done.
+Note: generation routes through the IronLabs image/video connector — only IRONLABS_API_KEY needed.
+      Both image and video tasks complete synchronously: task create/result already have
+      the final asset, and "task wait" is a no-op kept for script compatibility.
       Results are cached locally in ~/.ironlabs/tasks/.
       Materials are stored locally in ~/.ironlabs/materials/.
 `.trim();
@@ -698,16 +722,12 @@ var HELP_TASK = `
 ironlabs task — Manage generation tasks
 
 Commands:
-  generate                    Create task + wait for result (one step)
-  create                      Create a task. Images: completes synchronously. Videos:
-                               returns immediately with status "pending" — call task wait
-                               (or task generate) to actually block until the video is done.
+  generate                    Create a task and return its finished result
+  create                      Same as generate — both image and video complete synchronously
   list                        List local tasks
   get <id>                    Get task detail
-  result <id>                 Get the cached task result as-is (does NOT wait — for a
-                               still-pending video task this returns no videoUrl yet)
-  wait <id> [--timeout <s>]   Wait for task to finish (instant if already done, otherwise
-                               polls; default timeout 600s)
+  result <id>                 Get the cached task result
+  wait <id>                   No-op kept for script compatibility (generation is synchronous)
   cancel <id>                 Cancel a task (no-op for synchronous tasks)
   chain <id>                  Download completed task result → upload as material (first_frame chaining)
   tags                        List all your tags
@@ -715,62 +735,72 @@ Commands:
 
 Options for generate/create:
   --prompt <text>             (required) Generation prompt
-  --model <id>                OpenRouter model id (default: x-ai/grok-imagine-video).
-                               A bare slug is accepted and expanded, e.g. "seedance-2.0"
-                               → "bytedance/seedance-2.0".
-  --duration <seconds>        Video duration (default: 5)
-  --ratio <w:h>               Aspect ratio (default: 1:1)
-  --resolution <1k|2k|4k>     Image resolution (image models)
-  --seed <int>                Deterministic seed (image models). The connector caches on the
-                               exact request, so reusing a seed replays the same image for free
-                               instead of re-generating. Omit for a fresh random result.
+  --user-prompt <text>        The user's own wording, when --prompt is your expansion of it.
+                               The server keys its cache on this, so passing it is what lets
+                               a repeat ask hit the cache instead of paying to regenerate.
+  --model <id>                Model id. A bare slug is accepted and expanded, e.g.
+                               "seedance-2.0" → "bytedance/seedance-2.0". Omitting it means
+                               video: the server also checks its cache under the other video
+                               models before generating, which it skips once you name one.
+                               (Images have no such cross-model check, and need a model here
+                               anyway — with no --model the CLI treats the task as video.)
+  --duration <seconds>        Video duration (server default: 10)
+  --ratio <w:h>               Aspect ratio (server default: 16:9)
+  --resolution <1k|2k|4k>     Video resolution — 1k=720p, 2k/4k=1080p (ignored for images)
+  --quantity <1-4>            How many images to generate (image models; default 1)
+  --no-audio                  Render the video silent. Leave this off unless asked: it scopes
+                               the cache key and forces the request off the cheaper MuAPI tier.
   --tags <a,b,c>              Comma-separated tags
   --materials <spec>          Material refs: "id:role" or "id1:role1,id2:role2"
-                               Roles: ref_image, first_frame, last_frame
-                               ref_image: bind each to @Image1, @Image2, ... tokens in --prompt,
-                               in upload order. The connector caps the count per model.
+                               Roles: ref_image, first_frame
+                               Video takes a single still, used as the first frame. Extra
+                               ref_image entries and last_frame are ignored with a warning.
 
-Options for generate/wait:
-  --timeout <seconds>          Max time to poll a pending video task (default: 600)
-
-Models (real OpenRouter ids — no aliases):
-  Video (async; poll with task wait)
-    x-ai/grok-imagine-video     (default)
+Models:
+  Video
+    bytedance/seedance-2.0      (default)
+    x-ai/grok-imagine-video
     kwaivgi/kling-v3.0-pro
-    bytedance/seedance-2.0
-    alibaba/happyhorse-1.1
-  Image (synchronous)
-    google/gemini-3.1-flash-image-preview
-  (any other full OpenRouter model path is passed through as-is)
+    alibaba/happyhorse-1.1      (not on MuAPI — always billed via OpenRouter)
+  Image
+    google/gemini-3.1-flash-image-preview   (default)
+    google/gemini-3.1-flash-lite-image
+    google/gemini-3-pro-image-preview
+    google/gemini-2.5-flash-image
+    x-ai/grok-imagine-image-quality
+    bytedance-seed/seedream-4.5
+  (any other full provider/model path is passed through as-is)
 
 Note: all generation goes through the IronLabs image/video connector
-      (image_generate / video_submit / video_status). Per-model capability rules —
-      which models accept a last_frame, how many ref_image references they take —
-      are enforced by the connector, not by this CLI, so an unsupported combination
-      comes back as a clear error from the server rather than being silently dropped
-      here. Video continuation from an existing clip is not supported by any model;
-      extract a tail frame with ffmpeg and pass it as first_frame instead.
+      (image_generate / video_generate) — the same endpoint and the same server-side
+      chain the chat app uses: exact cache → semantic cache → MuAPI → OpenRouter
+      fallback. Each result reports which tier served it; "task result" shows it as
+      "source", alongside the real "costUsd". Per-model capability rules are enforced
+      server-side, so an unsupported combination comes back as an error from the
+      server rather than being silently dropped here. Video continuation from an
+      existing clip is not supported; extract a tail frame with ffmpeg and pass it as
+      first_frame instead.
 
 Examples:
   ironlabs task generate --prompt "a cat dancing" --duration 5
-  ironlabs task generate --prompt "cute cat" --model google/gemini-3.1-flash-image-preview --resolution 2k
+  ironlabs task generate --prompt "cute cat" --model google/gemini-3.1-flash-image-preview
   ironlabs task generate --prompt "hero product shot" --model gemini-3.1-flash-image-preview --ratio 16:9
   ironlabs task create --prompt "epic scene" --duration 10 --ratio 16:9 --model bytedance/seedance-2.0
-  ironlabs task wait 1234567890 --timeout 300
   ironlabs task list --status completed --limit 5
   ironlabs task result 1234567890
   ironlabs task chain 1234567890
 
-  # Multi-reference (@Image1/@Image2 binding):
-  IMG1=$(node ironlabs-cli.mjs material upload girl.jpg | jq -r '.material.id')
-  IMG2=$(node ironlabs-cli.mjs material upload hallway.jpg | jq -r '.material.id')
+  # Image-to-image / first-frame chaining:
+  IMG=$(node ironlabs-cli.mjs material upload girl.jpg | jq -r '.material.id')
   node ironlabs-cli.mjs task generate \\
-    --prompt "@Image1 walks down the hallway, @Image2 visible in the background" \\
-    --materials "\${IMG1}:ref_image,\${IMG2}:ref_image"
+    --prompt "she walks down a neon-lit hallway" \\
+    --materials "\${IMG}:first_frame"
 
-  # Reproducible image — same seed replays the cached result, no new spend:
-  node ironlabs-cli.mjs task generate --model google/gemini-3.1-flash-image-preview \\
-    --prompt "hero product shot on white" --ratio 16:9 --seed 0
+  # Cache-friendly: pass the user's own wording so a repeat ask is served free.
+  node ironlabs-cli.mjs task generate \\
+    --user-prompt "give me an owl image" \\
+    --prompt "a great horned owl on a branch, photorealistic" \\
+    --model google/gemini-3.1-flash-image-preview
 `.trim();
 var HELP_MATERIAL = `
 ironlabs material — Manage materials
@@ -840,8 +870,8 @@ Commands:
   estimate                    Estimate task cost by model and duration
 
 Options for estimate:
-  --model <id>                OpenRouter model id (default: x-ai/grok-imagine-video)
-  --duration <seconds>        Video duration for video models (default: 5)
+  --model <id>                Model id (default: bytedance/seedance-2.0)
+  --duration <seconds>        Video duration for video models (default: 10)
 
 Examples:
   ironlabs credit me
@@ -858,9 +888,7 @@ async function taskGenerate(client, flags) {
   console.error("Creating task...");
   const { task } = await client.createTask(params);
   console.error(`Task #${task.id} created (${task.status}).`);
-  const maxWaitMs = flags.timeout ? parseInt(flags.timeout) * 1000 : undefined;
-  const result = await client.waitForTask(task.id, maxWaitMs);
-  console.error("Done!");
+  const result = await client.waitForTask(task.id);
   printResult(result);
 }
 async function taskCreate(client, flags) {
@@ -907,16 +935,13 @@ async function taskResult(client, positional) {
   const result = await client.getTaskResult(id);
   printResult(result);
 }
-async function taskWait(client, positional, flags) {
+async function taskWait(client, positional) {
   const id = parseInt(positional[0]);
   if (!id) {
-    console.error("Error: task ID required.\nUsage: ironlabs task wait <id> [--timeout <seconds>]");
+    console.error("Error: task ID required.\nUsage: ironlabs task wait <id>");
     process.exit(1);
   }
-  console.error(`Task #${id}: waiting for completion (instant if already done, polls if still pending)...`);
-  const maxWaitMs = flags.timeout ? parseInt(flags.timeout) * 1000 : undefined;
-  const result = await client.waitForTask(id, maxWaitMs);
-  console.error("Done!");
+  const result = await client.waitForTask(id);
   printResult(result);
 }
 async function taskCancel(client, positional) {
@@ -945,19 +970,11 @@ async function taskChain(client, positional) {
   const ext = isVideo ? "mp4" : "png";
   const tmpPath = join(os.tmpdir(), `chain-${id}.${ext}`);
   console.error(`Downloading ${isVideo ? "video" : "image"} to ${tmpPath}...`);
-  // Video URLs from OpenRouter require gateway auth — use video_download connector
-  let arrayBuf;
-  if (isVideo) {
-    const dlResult = await client.mcpCall("openrouter", "video_download", { url });
-    if (!dlResult.data_base64) throw new Error("video_download returned no data");
-    arrayBuf = Buffer.from(dlResult.data_base64, "base64");
-    // video_download hits the same billable connector as generation — refresh in case it's metered too.
-    await refreshBalanceCache(client);
-  } else {
-    const resp = await fetch(url);
-    if (!resp.ok) throw new Error(`Download failed: ${resp.status}`);
-    arrayBuf = Buffer.from(await resp.arrayBuffer());
-  }
+  // Both connectors hand back a plain fetchable link (never inline base64 and
+  // never a gateway URL needing auth), so a straight fetch works for both.
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error(`Download failed: ${resp.status}`);
+  const arrayBuf = Buffer.from(await resp.arrayBuffer());
   writeFileSync(tmpPath, arrayBuf);
   console.error(`Downloaded: ${(arrayBuf.byteLength / 1024 / 1024).toFixed(1)}MB`);
   const type = isVideo ? "video" : "image";
@@ -1109,14 +1126,19 @@ function buildCreateParams(flags) {
   if (flags.duration) params.duration = parseInt(flags.duration);
   if (flags.ratio) params.ratio = flags.ratio;
   if (flags.resolution) params.resolution = flags.resolution;
-  if (flags.seed !== undefined && flags.seed !== "true") {
-    const seed = parseInt(flags.seed);
-    if (Number.isNaN(seed)) {
-      console.error(`Error: --seed must be an integer, got "${flags.seed}".`);
+  if (flags["user-prompt"]) params.userPrompt = flags["user-prompt"];
+  if (flags.quantity !== undefined && flags.quantity !== "true") {
+    const quantity = parseInt(flags.quantity);
+    if (Number.isNaN(quantity) || quantity < 1 || quantity > 4) {
+      console.error(`Error: --quantity must be an integer from 1 to 4, got "${flags.quantity}".`);
       process.exit(1);
     }
-    params.seed = seed;
+    params.quantity = quantity;
   }
+  // Left unset by default on purpose: the connector defaults audio on, and
+  // pinning it scopes the cache key (a silent request never matches a video
+  // already rendered with audio) and forces the request off the MuAPI tier.
+  if (flags["no-audio"]) params.audio = false;
   if (flags.tags) params.tags = flags.tags.split(",").map((t) => t.trim());
   const allMaterials = [];
   if (flags.materials) {
@@ -1148,6 +1170,8 @@ function printResult(result) {
   console.error(`Task #${result.taskId}  ${result.status}`);
   if (result.videoUrl) console.error(`  Video: ${result.videoUrl}`);
   if (result.imageUrl) console.error(`  Image: ${result.imageUrl}`);
+  // Which tier of the server chain served this, and what it actually cost.
+  if (result.source) console.error(`  Source: ${result.source}${result.costUsd !== undefined ? `  ($${result.costUsd})` : ""}`);
   json(result);
 }
 var DOMAIN_HELP = {
@@ -1196,7 +1220,7 @@ async function main() {
           case "list":     await taskList(client, flags); break;
           case "get":      await taskGet(client, subPositional); break;
           case "result":   await taskResult(client, subPositional); break;
-          case "wait":     await taskWait(client, subPositional, flags); break;
+          case "wait":     await taskWait(client, subPositional); break;
           case "cancel":   await taskCancel(client, subPositional); break;
           case "chain":    await taskChain(client, subPositional); break;
           case "tags":     await taskTags(client); break;

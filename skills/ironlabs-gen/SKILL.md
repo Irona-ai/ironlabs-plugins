@@ -1,9 +1,8 @@
 ---
 name: ironlabs-gen
 description: >
-  AI video and image generation via IronLabs OpenRouter MCP connector.
-  Backend: POST /api/v1/ext/token → POST /api/v1/mcp/openrouter (image_generate /
-  video_submit / video_status tools).
+  AI video and image generation via the IronLabs image/video MCP connector.
+  Backend: POST /api/v1/mcp/ext/generate (image_generate / video_generate tools).
   Uses ironlabs-cli.mjs — same CLI interface as the IronLabs plugin.
   This is the tool layer — for creative direction (story, prompts, anchoring),
   use the director skill.
@@ -15,20 +14,22 @@ metadata:
   author: ironlabs
   version: 0.3.0
   category: video-production
-  tags: [video-generation, image-generation, openrouter, material-pool]
+  tags: [video-generation, image-generation, material-pool]
 ---
 
 # IronLabs Video/Image Gen — Tool Reference
 
-Video and image generation via IronLabs OpenRouter connector. This skill covers **how to use the tools**.
+Video and image generation via the IronLabs image/video connector. This skill covers **how to use the tools**.
 For creative decisions (story, prompts, anchoring strategy), see the **director** skill.
 
-**Backend**: `POST /api/v1/ext/token` → `POST /api/v1/mcp/openrouter` (`image_generate`, `video_submit`, `video_status` tools)
-Uses `ironlabs-cli.mjs` — same CLI interface as the IronLabs plugin, adapted for IronLabs.
+**Backend**: `POST /api/v1/mcp/ext/generate` (`image_generate`, `video_generate` tools) — the same
+endpoint the chat app uses, so a generation here runs the same server-side chain:
+**exact cache → semantic cache → MuAPI → OpenRouter fallback**. Both tools are synchronous;
+each result reports which tier served it (`source`) and what it cost (`costUsd`).
 
-**Auth**: `IRONLABS_API_KEY`. Get one at https://studio.ironlabs.ai → API Keys.
-The **OpenRouter** external connector must be connected in IronLabs (**Settings → Connectors → OpenRouter**).
-Visual analysis (material-ingest) shells out to `visual-analysis`'s script, which runs natively via Irona's LLM gateway — no OpenRouter connector or additional setup needed.
+**Auth**: `IRONLABS_API_KEY`. Get one at https://studio.ironlabs.ai → API Keys. That key is the only
+credential needed — the connector holds the upstream provider keys server-side.
+Visual analysis (material-ingest) shells out to `visual-analysis`'s script, which runs natively via Irona's LLM gateway — no additional setup needed.
 
 ---
 
@@ -54,24 +55,35 @@ node ${CLAUDE_SKILL_DIR}/ironlabs-cli.mjs task generate \
 
 ## Supported Models
 
-Real OpenRouter model ids — there is no alias layer. A bare slug is accepted and
+Real model ids — there is no alias layer. A bare slug is accepted and
 expanded (`seedance-2.0` → `bytedance/seedance-2.0`); anything else is rejected
 with an error rather than silently falling back to a default.
 
 | Model | Type | Notes |
 |-------|------|-------|
-| `x-ai/grok-imagine-video` | Video | Default video |
+| `bytedance/seedance-2.0` | Video | **Default video** |
+| `x-ai/grok-imagine-video` | Video | Alt video model |
 | `kwaivgi/kling-v3.0-pro` | Video | Fast video |
-| `bytedance/seedance-2.0` | Video | Highest ref-image capacity |
-| `alibaba/happyhorse-1.1` | Video | Alt video model |
-| `google/gemini-3.1-flash-image-preview` | Image | Default image |
+| `alibaba/happyhorse-1.1` | Video | Not on MuAPI — always billed via OpenRouter |
+| `google/gemini-3.1-flash-image-preview` | Image | **Default image** (Nano Banana 2) |
+| `google/gemini-3.1-flash-lite-image` | Image | Cheapest image |
+| `google/gemini-3-pro-image-preview` | Image | Highest quality |
+| `google/gemini-2.5-flash-image` | Image | Nano Banana 1 |
+| `x-ai/grok-imagine-image-quality` | Image | Alt image model |
+| `bytedance-seed/seedream-4.5` | Image | Alt image model |
 | *(any other `provider/model` path)* | — | Advanced: passed through to the connector as-is |
 
-Per-model capability rules — aspect ratios, duration bounds, resolutions,
-whether a `last_frame` is accepted, how many `ref_image` references are used —
+Per-model capability rules — aspect ratios, duration bounds, resolutions, and
+whether a request can be served by MuAPI or must fall through to OpenRouter —
 are enforced by the connector server-side, not by this CLI. An unsupported
 combination comes back as a clear error from the server instead of being
 silently dropped locally.
+
+**Caching.** Both tools key their cache on the *user's own wording*, so pass
+`--user-prompt "<what the user actually asked for>"` whenever `--prompt` is your
+expanded version of it — that is what lets a repeat request be served free
+instead of regenerating. Omitting `--model` on a video additionally lets the
+server check its cache under the other video models before generating.
 
 ---
 
@@ -90,10 +102,12 @@ node ${CLAUDE_SKILL_DIR}/ironlabs-cli.mjs task generate \
 | Parameter | Description | Default |
 |-----------|-------------|---------|
 | `--prompt` | **(required)** English narrative prompt | — |
-| `--duration` | Video duration 5–15s. Omit and the API applies its own default (5s) — always pass explicitly; the recommended segment length is 15s | `5` (API default if omitted) |
-| `--ratio` | Aspect ratio: 16:9, 9:16, 1:1, 4:3, 3:4 | `1:1` |
-| `--materials` | Comma-separated `<mat-id:role>` pairs | — |
-| `--model` | OpenRouter model id (bare slug accepted) | `x-ai/grok-imagine-video` |
+| `--user-prompt` | The user's own wording, when `--prompt` is your expansion of it. The cache is keyed on this | — |
+| `--duration` | Video duration 5–15s. Omit and the server applies its own default (10s) — always pass explicitly; the recommended segment length is 15s | `10` (server default if omitted) |
+| `--ratio` | Aspect ratio: 16:9, 9:16, 1:1, 4:3, 3:4 | `16:9` |
+| `--materials` | Comma-separated `<mat-id:role>` pairs. Video uses a single still as its first frame | — |
+| `--model` | Model id (bare slug accepted). Omit to also get the cross-model cache check | `bytedance/seedance-2.0` |
+| `--no-audio` | Render silent. Avoid unless asked — it scopes the cache key and skips the MuAPI tier | audio on |
 | `--tags` | Project tags | — |
 
 ### Image Generation
@@ -103,15 +117,18 @@ node ${CLAUDE_SKILL_DIR}/ironlabs-cli.mjs task generate \
   --prompt "..." --model google/gemini-3.1-flash-image-preview --ratio 16:9
 ```
 
-**`--seed` (images):** the connector caches on the exact request, so passing the
-same `--seed` replays the previously generated image at no extra generation cost.
-Omit it for a fresh random result. When generating a batch, pass sequential seeds
-(`0`, `1`, `2`, ...) and reuse the same seed for the same slot on a re-run.
+Images take `--quantity <1-4>` for a batch in one call. `--resolution` does not apply —
+image size is controlled by `--ratio`.
+
+**Reusing a result instead of paying again:** there is no client-side seed. Repeat
+generations are deduplicated by the server's cache, which keys on the request and on
+`--user-prompt`, so pass the user's own wording to make a repeat ask hit it:
 
 ```bash
 node ${CLAUDE_SKILL_DIR}/ironlabs-cli.mjs task generate \
-  --prompt "hero product shot on white" \
-  --model google/gemini-3.1-flash-image-preview --ratio 16:9 --seed 0
+  --user-prompt "give me an owl image" \
+  --prompt "a great horned owl on a branch, photorealistic" \
+  --model google/gemini-3.1-flash-image-preview --ratio 16:9
 ```
 
 ---
@@ -146,7 +163,7 @@ node ${CLAUDE_SKILL_DIR}/ironlabs-cli.mjs task generate \
 
 ## Material Pool (Batch Ingest)
 
-Scan a folder, analyze with visual analysis (native via Irona's LLM gateway — no OpenRouter connector), output `material-pool.json`:
+Scan a folder, analyze with visual analysis (native via Irona's LLM gateway — no generation connector), output `material-pool.json`:
 
 ```bash
 node ${CLAUDE_SKILL_DIR}/scripts/material-ingest.mjs ./materials/
@@ -178,9 +195,9 @@ node ${CLAUDE_SKILL_DIR}/scripts/match-materials.mjs \
 | Error | Cause | Fix |
 |-------|-------|-----|
 | 401 Unauthorized | Invalid `IRONLABS_API_KEY` | Check env var, run `/ironlabs:setup` |
-| OpenRouter connector error | OpenRouter not connected | Connect at **Settings → Connectors → OpenRouter** |
+| Image/Video connector error | Connector turned off, or no Pro/credits | Enable at **Settings → Connectors**; check `ironlabs credit me` |
 | Material not found | Invalid material ID | Run `ironlabs material upload <file>` first |
-| Timeout | Large video generation | Response may take 2-5 min; retry if needed |
+| Stream closed without a result | The render outran the server's request budget | Retry with a shorter `--duration`; the job may already have been billed |
 
 ---
 
